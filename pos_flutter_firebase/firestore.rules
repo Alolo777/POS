@@ -1,0 +1,108 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDocPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function hasUserProfile() {
+      return signedIn() && exists(userDocPath());
+    }
+
+    function userProfile() {
+      return get(userDocPath());
+    }
+
+    function belongsToBusiness(businessId) {
+      return hasUserProfile()
+        && userProfile().data.businessId == businessId;
+    }
+
+    match /users/{userId} {
+      allow read, create, update: if signedIn()
+        && userId == request.auth.uid;
+    }
+
+    match /businesses/{businessId} {
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+
+      allow read, update: if signedIn()
+        && (
+          resource.data.ownerUid == request.auth.uid
+          || belongsToBusiness(businessId)
+        );
+
+      match /stores/{storeId} {
+        allow read, update: if belongsToBusiness(businessId);
+
+        allow create: if signedIn()
+          && request.resource.data.businessId == businessId;
+      }
+
+      match /employees/{employeeId} {
+        allow read: if belongsToBusiness(businessId);
+
+        allow create: if signedIn()
+          && employeeId == request.auth.uid
+          && request.resource.data.authUid == request.auth.uid
+          && request.resource.data.businessId == businessId;
+
+        allow update: if belongsToBusiness(businessId);
+      }
+
+      match /categories/{categoryId} {
+        allow read, create, update: if belongsToBusiness(businessId);
+      }
+
+      match /products/{productId} {
+        allow read, create, update: if belongsToBusiness(businessId);
+
+        match /stockByStore/{storeId} {
+          allow read, create, update: if belongsToBusiness(businessId);
+        }
+      }
+
+      match /productRefs/{refId} {
+        allow read, create: if belongsToBusiness(businessId);
+      }
+
+      match /counters/{counterId} {
+        allow read, create, update: if belongsToBusiness(businessId);
+      }
+
+      match /sales/{saleId} {
+        allow read, create, update: if belongsToBusiness(businessId);
+      }
+
+      match /inventoryMovements/{movementId} {
+        allow read, create: if belongsToBusiness(businessId);
+      }
+
+      match /shifts/{shiftId} {
+        allow read, create, update: if belongsToBusiness(businessId);
+      }
+
+      match /customers/{customerId} {
+        allow read, create, update: if belongsToBusiness(businessId);
+      }
+
+      match /modifiers/{modifierId} {
+        allow read, create, update: if belongsToBusiness(businessId);
+      }
+
+      match /discounts/{discountId} {
+        allow read, create, update: if belongsToBusiness(businessId);
+      }
+
+      match /openTickets/{ticketId} {
+        allow read, create, update: if belongsToBusiness(businessId);
+      }
+    }
+  }
+}
