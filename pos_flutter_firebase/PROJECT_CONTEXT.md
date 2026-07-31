@@ -1573,6 +1573,105 @@ Flujo de prueba recomendado:
 12. Verificar que aparecen los cortes de caja con tienda, fechas y totales.
 13. Tocar un corte para ver detalle completo y diferencia.
 
+## Actualización 2026-07-25: Módulo de Pollería (Chicken Receiving + Config)
+
+Se implementó un módulo completo para gestión de pollería:
+
+### Estructura
+
+```
+lib/features/poultry/
+  domain/
+    poultry_repository.dart    # Interfaz abstracta
+    poultry_config.dart        # Config: secciones de corte + tolerancia
+    poultry_section.dart       # Sección individual (nombre, %, producto)
+    chicken_receiving.dart     # Recepción de pollo (peso, merma, secciones)
+  data/
+    poultry_service.dart       # Implementación Firestore
+  ui/
+    poultry_config_screen.dart # Configurar cortes y tolerancia
+    receive_chicken_screen.dart # Registrar recepción de pollo
+```
+
+### Firestore paths nuevos
+
+```
+businesses/{businessId}/config/poultry
+  tolerancePercent    # double, ej: 5.0
+  wholeProductId      # string opcional
+  sections            # array de {id, name, defaultPercent, productId, sortOrder}
+
+businesses/{businessId}/poultryReceivings/{receiptId}
+  businessId, storeId, employeeId
+  chickenCount, totalWeightKg
+  butcheredCount, wholeCount
+  butcheredWeightKg, wholeWeightKg
+  sections            # array de {name, defaultPercent, expectedKg, actualKg, productId}
+  sumActualKg, mermaKg, mermaPercent
+  createdAt
+```
+
+### Reglas de Firestore requeridas
+
+Dentro de `match /businesses/{businessId}`:
+
+```javascript
+match /config/{configId} {
+  allow read: if canReadBusiness(businessId);
+  allow write: if canManageCatalog(businessId);
+}
+match /poultryReceivings/{receiptId} {
+  allow read: if canReadBusiness(businessId);
+  allow create: if canManageCatalog(businessId) && hasBusinessId(businessId);
+}
+```
+
+### Flujo de uso
+1. Admin configura los cortes en Settings > Pollería (nombres y porcentajes predeterminados).
+2. En navegación, el usuario recibe pollos y registra peso total, cantidad, peso real por sección.
+3. El sistema calcula merma automáticamente, **crea productos automáticamente** para cada sección si no existen, y actualiza el stock de cada producto.
+
+### Errores corregidos en el módulo de Pollería
+
+1. **Pantalla negra tras guardar recepción**: 
+   - `ReceiveChickenScreen` usaba `Navigator.pop()` al terminar, pero como es una pantalla embebida en `HomeScreen` (no una ruta empujada), esto destruía el shell de GoRouter y dejaba la pantalla en negro.
+   - **Solución**: reemplazar `Navigator.pop()` por `_resetForm()` que limpia el formulario sin navegar.
+
+2. **Pantalla negra al navegar a Config > Pollería**:
+   - `PoultryConfigScreen` se navegaba desde `SettingsScreen` sin `rootNavigator: true`, quedando dentro del shell de GoRouter en vez de en el navigador raíz.
+   - **Solución**: usar `Navigator.of(context, rootNavigator: true).push(...)`.
+
+3. **Pantalla negra por falta de color de fondo en el shell**:
+   - `_ShellWrapper` (GoRouter ShellRoute) no definía color de fondo, por lo que cualquier error/rebuild que no renderizara el hijo dejaba la pantalla en negro.
+   - **Solución**: agregar `Container(color: scaffoldBackgroundColor)` en `_ShellWrapper`.
+
+4. **_save() sin try-catch en PoultryConfigScreen**:
+   - Si `saveConfig()` fallaba por reglas de Firestore, la excepción no se manejaba y colgaba el árbol de widgets.
+   - **Solución**: agregar `try/catch/finally` con estado `_saving` y SnackBar de error.
+
+5. **TextEditingControllers huérfanos en _resetForm()**:
+   - `_resetForm()` limpiaba `_sectionCtrls` sin `dispose()` de los `TextEditingController`, dejando callbacks vivos que disparaban `setState()` innecesarios.
+   - **Solución**: dispose de cada controller antes de limpiar la lista. También en `_calculate()`.
+
+6. **Productos de pollería no se creaban automáticamente**:
+   - `saveReceiving()` solo actualizaba stock de secciones con `productId` (casi siempre nulo porque el usuario no ingresaba IDs manuales).
+   - **Solución**: `_resolveProductId()` que busca productos por nombre de sección. Si no existe, lo crea con REF tipo `PO{timestamp}`, `sellBy: 'weight'`, precio 0, stock inicial 0. El stock se suma en la transacción principal.
+
+7. **Firestore rules faltantes para `config` y `poultryReceivings`**:
+   - Las reglas no tenían `match` para estas subcolecciones, provocando `PERMISSION_DENIED` en todas las operaciones de pollería.
+   - **Solución**: agregar reglas dentro de `match /businesses/{businessId}`.
+
+8. **Sin captura global de errores**:
+   - `FlutterError.onError` no estaba configurado. Errores fuera del build (async) no se mostraban.
+   - **Solución**: agregar `FlutterError.onError` + `runZonedGuarded` en `main.dart` para capturar cualquier error no manejado y loguearlo con `debugPrint`.
+
+### NOTA IMPORTANTE — Pruebas pendientes
+
+Este módulo fue corregido pero NO se han probado todos los flujos de forma completa en dispositivo real. 
+Antes de considerar el módulo estable, se debe ejecutar la checklist de funciones (ver más abajo).
+
+---
+
 ## Actualizacion 2026-07-07: PDF tickets e historial de inventario
 
 Se implementaron dos mejoras importantes:
@@ -1619,3 +1718,71 @@ Flujo de prueba:
 5. Cancelar/devolver la venta con regreso de inventario.
 6. Verificar en Back Office > Inventario que aparece el movimiento de tipo "Devolucion".
 7. Ajustar stock manualmente y verificar movimiento de tipo "Ajuste".
+
+---
+
+## Checklist de pruebas — Módulo de Pollería
+
+### Configuración de cortes (PoultryConfigScreen)
+
+| # | Función | Prueba | Estado |
+|---|---------|--------|--------|
+| 1.1 | Cargar configuración | Navegar a Settings > Pollería, debe mostrar secciones por defecto | ⬜ Pendiente |
+| 1.2 | Guardar configuración | Modificar porcentajes y guardar, debe mostrar SnackBar de éxito | ⬜ Pendiente |
+| 1.3 | Guardar con error | Desconectar internet y guardar, debe mostrar SnackBar de error | ⬜ Pendiente |
+| 1.4 | Agregar sección | Tocar "+ Agregar", debe agregar una fila nueva en blanco | ⬜ Pendiente |
+| 1.5 | Eliminar sección | Tocar ícono rojo de eliminar, debe quitar la sección | ⬜ Pendiente |
+| 1.6 | Cambiar tolerancia | Editar el campo de tolerancia y guardar, debe persistir | ⬜ Pendiente |
+| 1.7 | Volver atrás | Presionar back, debe regresar a Settings sin errores | ⬜ Pendiente |
+| 1.8 | Persistencia al recargar | Guardar, volver, entrar de nuevo, deben aparecer los mismos datos | ⬜ Pendiente |
+
+### Recepción de pollo (ReceiveChickenScreen)
+
+| # | Función | Prueba | Estado |
+|---|---------|--------|--------|
+| 2.1 | Cargar pantalla | Navegar a Pollería desde menú principal, debe mostrar formulario vacío | ⬜ Pendiente |
+| 2.2 | Sin configuración | Si no hay cortes configurados, debe mostrar mensaje "Configura los cortes en Configuración → Pollería" | ⬜ Pendiente |
+| 2.3 | Error al cargar | Bloquear lectura de config, debe mostrar pantalla de error con Reintentar | ⬜ Pendiente |
+| 2.4 | Calcular promedios | Ingresar cantidad y peso total, debe calcular peso promedio | ⬜ Pendiente |
+| 2.5 | Calcular secciones | Ingresar pollos a destazar, debe mostrar las secciones con pesos esperados | ⬜ Pendiente |
+| 2.6 | Editar peso real | Modificar el peso real de una sección, debe reflejarse en la merma | ⬜ Pendiente |
+| 2.7 | Guardar recepción exitosa | Llenar formulario y guardar, debe mostrar SnackBar de éxito y limpiar el formulario | ⬜ Pendiente |
+| 2.8 | Guardar con error | Desconectar internet (o bloquear escritura) y guardar, debe mostrar SnackBar de error | ⬜ Pendiente |
+| 2.9 | Desviación > tolerancia | Ingresar un peso real con desviación mayor a la tolerancia, debe mostrar advertencia | ⬜ Pendiente |
+| 2.10 | Desviación: cancelar | En la advertencia de desviación, tocar Cancelar, no debe guardar | ⬜ Pendiente |
+| 2.11 | Desviación: continuar | En la advertencia de desviación, tocar Continuar, debe guardar | ⬜ Pendiente |
+| 2.12 | Validación: cantidad 0 | Intentar guardar con cantidad 0, debe mostrar error | ⬜ Pendiente |
+| 2.13 | Validación: peso 0 | Intentar guardar con peso 0, debe mostrar error | ⬜ Pendiente |
+| 2.14 | Validación: destazados > total | Ingresar más pollos destazados que recibidos, debe mostrar error | ⬜ Pendiente |
+| 2.15 | Botón de guardar deshabilitado | Durante el guardado, el botón debe mostrar spinner y estar deshabilitado | ⬜ Pendiente |
+
+### Creación automática de productos
+
+| # | Función | Prueba | Estado |
+|---|---------|--------|--------|
+| 3.1 | Producto creado automáticamente | Guardar recepción, ir a Productos y verificar que aparecen los productos creados (Pechuga, Maciza, etc.) | ⬜ Pendiente |
+| 3.2 | Stock actualizado | Verificar que el stock de cada producto corresponde al peso real ingresado | ⬜ Pendiente |
+| 3.3 | Producto existente reusado | Si el producto ya existe por nombre, no debe duplicarse; debe sumar stock al existente | ⬜ Pendiente |
+| 3.4 | Productos con precio configurable | Ir a Productos, editar precio/coste de los productos creados por pollería | ⬜ Pendiente |
+
+### Navegación y estabilidad
+
+| # | Función | Prueba | Estado |
+|---|---------|--------|--------|
+| 4.1 | Volver de pollería a menú | Estando en pantalla de recepción, cambiar a otra sección del menú (ej. POS), debe funcionar sin error | ⬜ Pendiente |
+| 4.2 | Múltiples guardados seguidos | Guardar recepción 3 veces seguidas sin recargar, el formulario debe limpiarse cada vez | ⬜ Pendiente |
+| 4.3 | Rotación de pantalla | Rotar dispositivo en medio del formulario, los datos deben conservarse | ⬜ Pendiente |
+| 4.4 | Sin pantalla negra | Después de guardar, la pantalla NO debe quedar negra | ⬜ Pendiente |
+| 4.5 | Sin pantalla negra al navegar | Navegar entre Config > Pollería y Pollería > Recepción y volver, sin pantalla negra | ⬜ Pendiente |
+
+### Funciones relacionadas (dependencias)
+
+| # | Módulo | Relación | Estado |
+|---|--------|----------|--------|
+| 5.1 | Productos | Los productos de pollería deben aparecer en lista de productos con stock correcto | ⬜ Pendiente |
+| 5.2 | POS | Los productos de pollería deben aparecer en el grid del POS para vender | ⬜ Pendiente |
+| 5.3 | Stock por sucursal | El stock de pollería debe respetar la sucursal donde se registró la recepción | ⬜ Pendiente |
+| 5.4 | Recibos | Las ventas de productos de pollería deben aparecer en Recibos | ⬜ Pendiente |
+| 5.5 | Back Office > Inventario | El stock de pollería debe verse en Back Office con movimientos correctos | ⬜ Pendiente |
+| 5.6 | Firestore rules | Las reglas deben permitir lectura/escritura de config y poultryReceivings | ⬜ Pendiente |
+| 5.7 | Firestore rules | Las reglas deben permitir creación de productos por el servicio de pollería (canManageCatalog) | ⬜ Pendiente |

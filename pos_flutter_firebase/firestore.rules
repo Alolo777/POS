@@ -10,6 +10,14 @@ service cloud.firestore {
       return /databases/$(database)/documents/users/$(request.auth.uid);
     }
 
+    function businessDocPath(businessId) {
+      return /databases/$(database)/documents/businesses/$(businessId);
+    }
+
+    function employeeDocPath(businessId) {
+      return /databases/$(database)/documents/businesses/$(businessId)/employees/$(userProfile().data.employeeId);
+    }
+
     function hasUserProfile() {
       return signedIn() && exists(userDocPath());
     }
@@ -20,88 +28,236 @@ service cloud.firestore {
 
     function belongsToBusiness(businessId) {
       return hasUserProfile()
-        && userProfile().data.businessId == businessId;
+        && userProfile().data.businessId == businessId
+        && exists(employeeDocPath(businessId))
+        && get(employeeDocPath(businessId)).data.active == true
+        && get(employeeDocPath(businessId)).data.authUid == request.auth.uid;
+    }
+
+    function isBusinessOwner(businessId) {
+      return signedIn()
+        && (
+          getAfter(businessDocPath(businessId)).data.ownerUid == request.auth.uid
+          || (exists(businessDocPath(businessId)) && get(businessDocPath(businessId)).data.ownerUid == request.auth.uid)
+        );
+    }
+
+    function employeeRole(businessId) {
+      return get(employeeDocPath(businessId)).data.role;
+    }
+
+    function hasRole(businessId, roles) {
+      return belongsToBusiness(businessId)
+        && employeeRole(businessId) in roles;
+    }
+
+    function canReadBusiness(businessId) {
+      return isBusinessOwner(businessId) || belongsToBusiness(businessId);
+    }
+
+    function canManageBusiness(businessId) {
+      return isBusinessOwner(businessId) || hasRole(businessId, ['owner', 'admin']);
+    }
+
+    function canManageStores(businessId) {
+      return isBusinessOwner(businessId) || hasRole(businessId, ['owner', 'admin', 'manager']);
+    }
+
+    function canManageEmployees(businessId) {
+      return isBusinessOwner(businessId) || hasRole(businessId, ['owner', 'admin']);
+    }
+
+    function canManageCatalog(businessId) {
+      return isBusinessOwner(businessId) || hasRole(businessId, ['owner', 'admin', 'manager']);
+    }
+
+    function canSell(businessId) {
+      return isBusinessOwner(businessId) || hasRole(businessId, ['owner', 'admin', 'manager', 'cashier']);
+    }
+
+    function hasBusinessId(businessId) {
+      return request.resource.data.businessId == businessId;
+    }
+
+    match /{path=**}/stockByStore/{storeId} {
+      allow read: if resource.data.businessId != null
+        && canReadBusiness(resource.data.businessId);
+      allow create, update: if request.resource.data.businessId != null
+        && (canManageCatalog(request.resource.data.businessId) || canSell(request.resource.data.businessId));
     }
 
     match /users/{userId} {
-      allow read, create, update: if signedIn()
+      allow read: if signedIn()
         && userId == request.auth.uid;
+
+      allow create: if signedIn()
+        && userId == request.auth.uid;
+
+      allow update: if signedIn()
+        && userId == request.auth.uid
+        && request.resource.data.businessId == resource.data.businessId
+        && request.resource.data.employeeId == resource.data.employeeId;
     }
 
     match /businesses/{businessId} {
       allow create: if signedIn()
         && request.resource.data.ownerUid == request.auth.uid;
 
-      allow read, update: if signedIn()
-        && (
-          resource.data.ownerUid == request.auth.uid
-          || belongsToBusiness(businessId)
-        );
+      allow read: if canReadBusiness(businessId);
+
+      allow update: if canManageBusiness(businessId)
+        && request.resource.data.ownerUid == resource.data.ownerUid;
 
       match /stores/{storeId} {
-        allow read, update: if belongsToBusiness(businessId);
+        allow read: if canReadBusiness(businessId);
+
+        allow update: if canManageStores(businessId)
+          && hasBusinessId(businessId);
 
         allow create: if signedIn()
-          && request.resource.data.businessId == businessId;
+          && hasBusinessId(businessId)
+          && (canManageStores(businessId) || isBusinessOwner(businessId));
       }
 
       match /employees/{employeeId} {
-        allow read: if belongsToBusiness(businessId);
+        allow read: if canReadBusiness(businessId);
 
         allow create: if signedIn()
-          && employeeId == request.auth.uid
-          && request.resource.data.authUid == request.auth.uid
-          && request.resource.data.businessId == businessId;
+          && hasBusinessId(businessId)
+          && (
+            canManageEmployees(businessId)
+            || (
+              employeeId == request.auth.uid
+              && request.resource.data.authUid == request.auth.uid
+              && isBusinessOwner(businessId)
+            )
+          );
 
-        allow update: if belongsToBusiness(businessId);
+        allow update: if canManageEmployees(businessId)
+          && request.resource.data.businessId == resource.data.businessId;
+
+        allow delete: if canManageEmployees(businessId)
+          && resource.data.businessId == businessId;
       }
 
       match /categories/{categoryId} {
-        allow read, create, update: if belongsToBusiness(businessId);
+        allow read: if canReadBusiness(businessId);
+        allow create: if canManageCatalog(businessId)
+          && hasBusinessId(businessId);
+        allow update: if canManageCatalog(businessId)
+          && request.resource.data.businessId == resource.data.businessId;
       }
 
       match /products/{productId} {
-        allow read, create, update: if belongsToBusiness(businessId);
+        allow read: if canReadBusiness(businessId);
+        allow create, update: if canManageCatalog(businessId)
+          && hasBusinessId(businessId);
 
         match /stockByStore/{storeId} {
-          allow read, create, update: if belongsToBusiness(businessId);
+          allow read: if canReadBusiness(businessId);
+          allow create, update: if canManageCatalog(businessId) || canSell(businessId);
         }
       }
 
       match /productRefs/{refId} {
-        allow read, create: if belongsToBusiness(businessId);
+        allow read: if canReadBusiness(businessId);
+        allow create, delete: if canManageCatalog(businessId);
       }
 
       match /counters/{counterId} {
-        allow read, create, update: if belongsToBusiness(businessId);
+        allow read: if canReadBusiness(businessId);
+        allow create, update: if canManageCatalog(businessId) || canSell(businessId);
       }
 
       match /sales/{saleId} {
-        allow read, create, update: if belongsToBusiness(businessId);
+        allow read: if canReadBusiness(businessId);
+        allow create, update: if canSell(businessId)
+          && hasBusinessId(businessId);
       }
 
       match /inventoryMovements/{movementId} {
-        allow read, create: if belongsToBusiness(businessId);
+        allow read: if canReadBusiness(businessId);
+        allow create: if (canManageCatalog(businessId) || canSell(businessId))
+          && hasBusinessId(businessId);
       }
 
       match /shifts/{shiftId} {
-        allow read, create, update: if belongsToBusiness(businessId);
+        allow read: if canReadBusiness(businessId);
+        allow create, update: if canSell(businessId)
+          && hasBusinessId(businessId);
       }
 
       match /customers/{customerId} {
-        allow read, create, update: if belongsToBusiness(businessId);
+        allow read: if canReadBusiness(businessId);
+        allow create, update: if canSell(businessId)
+          && hasBusinessId(businessId);
       }
 
       match /modifiers/{modifierId} {
-        allow read, create, update: if belongsToBusiness(businessId);
+        allow read: if canReadBusiness(businessId);
+        allow create: if canManageCatalog(businessId)
+          && hasBusinessId(businessId);
+        allow update: if canManageCatalog(businessId)
+          && request.resource.data.businessId == resource.data.businessId;
       }
 
       match /discounts/{discountId} {
-        allow read, create, update: if belongsToBusiness(businessId);
+        allow read: if canReadBusiness(businessId);
+        allow create: if canManageCatalog(businessId)
+          && hasBusinessId(businessId);
+        allow update: if canManageCatalog(businessId)
+          && request.resource.data.businessId == resource.data.businessId;
       }
 
       match /openTickets/{ticketId} {
-        allow read, create, update: if belongsToBusiness(businessId);
+        allow read: if canReadBusiness(businessId);
+        allow create, update: if canSell(businessId)
+          && hasBusinessId(businessId);
+      }
+
+      match /butcherRecipe/{docId} {
+        allow read: if canReadBusiness(businessId);
+        allow create, update: if canManageCatalog(businessId);
+      }
+
+      match /butcherReceipts/{receiptId} {
+        allow read: if canReadBusiness(businessId);
+        allow create: if canSell(businessId)
+          && hasBusinessId(businessId);
+      }
+
+      match /butchering/{recordId} {
+        allow read: if canReadBusiness(businessId);
+        allow create: if canSell(businessId)
+          && hasBusinessId(businessId);
+        allow update: if canSell(businessId)
+          && hasBusinessId(businessId);
+      }
+
+      match /butcherAnomalies/{anomalyId} {
+        allow read: if canReadBusiness(businessId);
+        allow create: if canSell(businessId)
+          && hasBusinessId(businessId);
+      }
+
+      // === NUEVAS REGLAS PARA POLLERÍA ===
+      match /config/{configId} {
+        allow read: if canReadBusiness(businessId);
+        allow write: if canManageCatalog(businessId);
+      }
+
+      match /poultryReceivings/{receiptId} {
+        allow read: if canReadBusiness(businessId);
+        allow create: if canSell(businessId)
+          && hasBusinessId(businessId);
+      }
+
+      match /transfers/{transferId} {
+        allow read: if canReadBusiness(businessId);
+        allow create: if canSell(businessId)
+          && hasBusinessId(businessId);
+        allow update: if canSell(businessId)
+          && request.resource.data.businessId == resource.data.businessId;
       }
     }
   }

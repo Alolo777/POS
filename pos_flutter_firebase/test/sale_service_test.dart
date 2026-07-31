@@ -1,11 +1,11 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../lib/models/cart_item.dart';
-import '../lib/models/product.dart';
-import '../lib/services/connectivity_service.dart';
-import '../lib/services/sale_service.dart';
+import 'package:pos_flutter_firebase/shared/models/cart_item.dart';
+import 'package:pos_flutter_firebase/shared/models/product.dart';
+import 'package:pos_flutter_firebase/core/network/connectivity_service.dart';
+import 'package:pos_flutter_firebase/features/sales/data/sale_service.dart';
+import 'package:pos_flutter_firebase/features/inventory/data/stock_service.dart';
 
 const businessId = 'test_business';
 const storeId = 'test_store';
@@ -24,9 +24,7 @@ Product _createProduct(String id, String name, double price, double stock, {bool
     cost: 0,
     ref: 'REF-$id',
     trackStock: trackStock,
-    stock: stock.toInt(),
     stockQuantity: stock,
-    lowStockAlert: 0,
     lowStockAlertQuantity: 0,
     presentationType: 'shape',
     presentationShape: 'square',
@@ -46,6 +44,7 @@ void main() {
     saleService = SaleService(
       firestore: fakeFirestore,
       connectivityService: ConnectivityService(),
+      stockService: StockService(firestore: fakeFirestore),
     );
   });
 
