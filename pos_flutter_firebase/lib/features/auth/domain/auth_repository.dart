@@ -4,6 +4,7 @@ abstract class AuthRepository {
   Stream<User?> get authStateChanges;
   Future<String?> signIn(String email, String password);
   Future<String?> signUp(String email, String password, String businessName);
+  Future<String?> sendPasswordReset(String email);
   Future<void> signOut();
   Future<void> ensureCurrentUserWorkspace();
   Future<void> createOwnerWorkspace({required String businessName, User? user});

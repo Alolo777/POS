@@ -133,5 +133,58 @@ void main() {
       completer.complete(null);
       await tester.pumpAndSettle();
     });
+
+    testWidgets('shows forgot password dialog and sends reset email', (tester) async {
+      when(() => mockAuthService.sendPasswordReset(any()))
+          .thenAnswer((_) async => null);
+
+      await tester.pumpWidget(createTestWidget());
+
+      await tester.tap(find.byKey(const Key('forgotPasswordButton')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Recuperar contrasena'), findsOneWidget);
+
+      await tester.enterText(find.byKey(const Key('forgotEmailField')), 'user@test.com');
+      await tester.tap(find.byKey(const Key('forgotSubmitButton')));
+      await tester.pumpAndSettle();
+
+      verify(() => mockAuthService.sendPasswordReset('user@test.com')).called(1);
+      expect(find.text('Recuperar contrasena'), findsNothing);
+      expect(find.text('Te enviamos un correo para restablecer tu contrasena'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('forgot password shows error when email is empty', (tester) async {
+      await tester.pumpWidget(createTestWidget());
+
+      await tester.tap(find.byKey(const Key('forgotPasswordButton')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('forgotSubmitButton')));
+      await tester.pump();
+
+      expect(find.text('Ingresa tu correo'), findsOneWidget);
+      verifyNever(() => mockAuthService.sendPasswordReset(any()));
+    });
+
+    testWidgets('forgot password shows service error inside dialog', (tester) async {
+      when(() => mockAuthService.sendPasswordReset(any()))
+          .thenAnswer((_) async => 'No existe una cuenta con ese correo');
+
+      await tester.pumpWidget(createTestWidget());
+
+      await tester.tap(find.byKey(const Key('forgotPasswordButton')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('forgotEmailField')), 'nobody@test.com');
+      await tester.tap(find.byKey(const Key('forgotSubmitButton')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Recuperar contrasena'), findsOneWidget);
+      expect(find.text('No existe una cuenta con ese correo'), findsOneWidget);
+    });
   });
 }

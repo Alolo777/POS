@@ -12,8 +12,10 @@ class AuthService implements AuthRepository {
   final FirebaseAuth _auth;
   final FirebaseFirestore _db;
 
+  @override
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
+  @override
   Future<String?> signIn(String email, String password) async {
     try {
       await _auth.signInWithEmailAndPassword(
@@ -28,6 +30,7 @@ class AuthService implements AuthRepository {
     }
   }
 
+  @override
   Future<String?> signUp(String email, String password, String businessName) async {
     try {
       final credential = await _auth.createUserWithEmailAndPassword(
@@ -43,10 +46,24 @@ class AuthService implements AuthRepository {
     }
   }
 
+  @override
+  Future<String?> sendPasswordReset(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email.trim());
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return _mapError(e.code);
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
+  @override
   Future<void> signOut() async {
     await _auth.signOut();
   }
 
+  @override
   Future<void> ensureCurrentUserWorkspace() async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -57,6 +74,7 @@ class AuthService implements AuthRepository {
     await createOwnerWorkspace(businessName: 'Mi negocio', user: user);
   }
 
+  @override
   Future<void> createOwnerWorkspace({
     required String businessName,
     User? user,
@@ -134,6 +152,12 @@ class AuthService implements AuthRepository {
         return 'La contrasena debe tener al menos 6 caracteres';
       case 'invalid-credential':
         return 'Correo o contrasena incorrectos';
+      case 'missing-email':
+        return 'Ingresa un correo';
+      case 'network-request-failed':
+        return 'Sin conexion a internet. Intenta de nuevo';
+      case 'too-many-requests':
+        return 'Demasiados intentos. Espera unos minutos e intenta de nuevo';
       default:
         return 'Error: $code';
     }

@@ -230,6 +230,36 @@ void main() {
     });
   });
 
+  group('AuthService.sendPasswordReset', () {
+    test('returns null and sends email trimmed', () async {
+      when(() => mockAuth.sendPasswordResetEmail(email: any(named: 'email')))
+          .thenAnswer((_) async {});
+
+      final result = await authService.sendPasswordReset('  user@test.com  ');
+
+      expect(result, isNull);
+      verify(() => mockAuth.sendPasswordResetEmail(email: 'user@test.com')).called(1);
+    });
+
+    test('returns error message on FirebaseAuthException', () async {
+      when(() => mockAuth.sendPasswordResetEmail(email: any(named: 'email')))
+          .thenThrow(FirebaseAuthException(code: 'user-not-found', message: 'not found'));
+
+      final result = await authService.sendPasswordReset('nobody@test.com');
+
+      expect(result, 'No existe una cuenta con ese correo');
+    });
+
+    test('maps missing-email error', () async {
+      when(() => mockAuth.sendPasswordResetEmail(email: any(named: 'email')))
+          .thenThrow(FirebaseAuthException(code: 'missing-email', message: 'no email'));
+
+      final result = await authService.sendPasswordReset('');
+
+      expect(result, 'Ingresa un correo');
+    });
+  });
+
   group('AuthService.signOut', () {
     test('calls FirebaseAuth.signOut', () async {
       when(() => mockAuth.signOut()).thenAnswer((_) async {});
