@@ -36,10 +36,15 @@ service cloud.firestore {
 
     function isBusinessOwner(businessId) {
       return signedIn()
-        && (
-          getAfter(businessDocPath(businessId)).data.ownerUid == request.auth.uid
-          || (exists(businessDocPath(businessId)) && get(businessDocPath(businessId)).data.ownerUid == request.auth.uid)
-        );
+        && exists(businessDocPath(businessId))
+        && get(businessDocPath(businessId)).data.ownerUid == request.auth.uid;
+    }
+
+    // getAfter() solo es valido en operaciones de escritura. Se usa en la creacion
+    // del workspace, donde business + store + employee se escriben en el mismo batch.
+    function canCreateOwnerResources(businessId) {
+      return signedIn()
+        && getAfter(businessDocPath(businessId)).data.ownerUid == request.auth.uid;
     }
 
     function employeeRole(businessId) {
@@ -116,7 +121,7 @@ service cloud.firestore {
 
         allow create: if signedIn()
           && hasBusinessId(businessId)
-          && (canManageStores(businessId) || isBusinessOwner(businessId));
+          && (canManageStores(businessId) || canCreateOwnerResources(businessId));
       }
 
       match /employees/{employeeId} {
@@ -129,7 +134,7 @@ service cloud.firestore {
             || (
               employeeId == request.auth.uid
               && request.resource.data.authUid == request.auth.uid
-              && isBusinessOwner(businessId)
+              && canCreateOwnerResources(businessId)
             )
           );
 

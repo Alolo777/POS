@@ -105,6 +105,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   selectedIndex: _selectedIndex,
                   onDestinationSelected: (index) => setState(() => _selectedIndex = index),
                   labelType: NavigationRailLabelType.all,
+                  scrollable: true,
                   leading: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                     child: Text(
