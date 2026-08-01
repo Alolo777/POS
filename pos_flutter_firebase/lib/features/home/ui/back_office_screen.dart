@@ -636,7 +636,9 @@ class _InventoryTab extends StatelessWidget {
                   children: movements.take(20).map((movement) {
                     return ListTile(
                       title: Text(movement.productName),
-                      subtitle: Text(movement.reason),
+                      subtitle: Text(
+                        '${movement.typeLabel}${movement.reason.isNotEmpty ? ' · ${movement.reason}' : ''}',
+                      ),
                       trailing: Text(movement.difference >= 0 ? '+${_formatQuantity(movement.difference)}' : _formatQuantity(movement.difference)),
                     );
                   }).toList(),

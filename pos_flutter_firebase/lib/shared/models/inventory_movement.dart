@@ -11,6 +11,7 @@ class InventoryMovement {
     required this.reason,
     required this.employeeId,
     required this.createdAt,
+    this.storedDifference,
   });
 
   final String id;
@@ -24,10 +25,18 @@ class InventoryMovement {
   final String reason;
   final String employeeId;
   final DateTime? createdAt;
+  final double? storedDifference;
 
-  double get difference => newQuantity - previousQuantity;
+  double get difference => storedDifference ?? (newQuantity - previousQuantity);
 
   factory InventoryMovement.fromMap(Map<String, dynamic> map, String id) {
+    final previousQuantity =
+        (map['previousQuantity'] ?? map['previousStock'] ?? 0).toDouble();
+    final newQuantity =
+        (map['newQuantity'] ??
+                map['newStock'] ??
+                (previousQuantity + (map['quantity'] as num? ?? 0)))
+            .toDouble();
     return InventoryMovement(
       id: id,
       businessId: map['businessId'] as String? ?? '',
@@ -35,11 +44,12 @@ class InventoryMovement {
       productId: map['productId'] as String? ?? '',
       productName: map['productName'] as String? ?? '',
       type: map['type'] as String? ?? '',
-      previousQuantity: (map['previousQuantity'] as num? ?? 0).toDouble(),
-      newQuantity: (map['newQuantity'] as num? ?? 0).toDouble(),
+      previousQuantity: previousQuantity,
+      newQuantity: newQuantity,
       reason: map['reason'] as String? ?? '',
       employeeId: map['employeeId'] as String? ?? '',
       createdAt: (map['createdAt'] as dynamic)?.toDate(),
+      storedDifference: (map['difference'] as num?)?.toDouble(),
     );
   }
 

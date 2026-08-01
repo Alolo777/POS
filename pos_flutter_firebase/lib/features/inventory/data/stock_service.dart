@@ -22,26 +22,54 @@ class StockService implements StockRepository {
       controller.add(cached);
     }
 
-    final sub = _db
-        .collectionGroup('stockByStore')
-        .where('businessId', isEqualTo: businessId)
-        .where('storeId', isEqualTo: storeId)
-        .snapshots()
-        .listen(
-      (snapshot) async {
-        final result = <String, ProductStock>{};
-        final stockList = <ProductStock>[];
-        for (final doc in snapshot.docs) {
-          final stock = ProductStock.fromDoc(doc);
-          result[stock.productId] = stock;
-          stockList.add(stock);
-        }
-        await LocalDatabase.cacheProductStock(businessId, stockList);
-        controller.add(result);
-      },
-    );
+    final subscriptions = <StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>{};
 
-    controller.onCancel = () => sub.cancel();
+    void disposeStockSubscriptions() {
+      for (final sub in subscriptions) {
+        sub.cancel();
+      }
+      subscriptions.clear();
+    }
+
+    // Escucha el stock de cada producto con lecturas por-ruta (path-scoped),
+    // que las reglas de Firestore permiten. No usa collectionGroup.
+    void subscribeToProducts(QuerySnapshot<Map<String, dynamic>> products) {
+      disposeStockSubscriptions();
+      final result = <String, ProductStock>{};
+      for (final productDoc in products.docs) {
+        final productId = productDoc.id;
+        final sub = _db
+            .collection('businesses')
+            .doc(businessId)
+            .collection('products')
+            .doc(productId)
+            .collection('stockByStore')
+            .doc(storeId)
+            .snapshots()
+            .listen((stockDoc) {
+          if (stockDoc.exists) {
+            final stock = ProductStock.fromDoc(stockDoc);
+            result[stock.productId] = stock;
+          } else {
+            result.remove(productId);
+          }
+          controller.add(Map<String, ProductStock>.from(result));
+        });
+        subscriptions.add(sub);
+      }
+    }
+
+    final productsSub = _db
+        .collection('businesses')
+        .doc(businessId)
+        .collection('products')
+        .snapshots()
+        .listen(subscribeToProducts);
+
+    controller.onCancel = () {
+      productsSub.cancel();
+      disposeStockSubscriptions();
+    };
     return controller.stream;
   }
 

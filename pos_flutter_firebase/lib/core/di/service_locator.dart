@@ -9,6 +9,8 @@ import '../../features/business/domain/business_repository.dart';
 import '../../features/business/data/business_service.dart';
 import '../../features/business/domain/backup_repository.dart';
 import '../../features/business/data/backup_service.dart';
+import '../../features/business/domain/excel_export_repository.dart';
+import '../../features/business/data/excel_export_service.dart';
 import '../../features/butcher/domain/butcher_repository.dart';
 import '../../features/butcher/data/butcher_service.dart';
 import '../../features/employees/domain/employee_repository.dart';
@@ -44,6 +46,7 @@ class ServiceLocator {
   late final AuthRepository authRepository;
   late final BusinessRepository businessRepository;
   late final BackupRepository backupRepository;
+  late final ExcelExportRepository excelExportRepository;
   late final EmployeeRepository employeeRepository;
   late final ProductRepository productRepository;
   late final CategoryRepository categoryRepository;
@@ -65,6 +68,7 @@ class ServiceLocator {
     authRepository = AuthService();
     businessRepository = BusinessService();
     backupRepository = BackupService();
+    excelExportRepository = ExcelExportService();
     employeeRepository = EmployeeService();
     productRepository = ProductService(
       connectivityService: connectivityService,
@@ -98,6 +102,7 @@ class ServiceLocator {
     Provider<AuthRepository>.value(value: authRepository),
     Provider<BusinessRepository>.value(value: businessRepository),
     Provider<BackupRepository>.value(value: backupRepository),
+    Provider<ExcelExportRepository>.value(value: excelExportRepository),
     Provider<EmployeeRepository>.value(value: employeeRepository),
     Provider<ProductRepository>.value(value: productRepository),
     Provider<CategoryRepository>.value(value: categoryRepository),

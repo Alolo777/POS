@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../shared/models/inventory_movement.dart';
@@ -16,21 +18,34 @@ class InventoryService implements InventoryRepository {
   final ConnectivityService _connectivityService;
 
   Stream<List<InventoryMovement>> watchMovements({required String businessId}) {
-    return _db
+    final controller = StreamController<List<InventoryMovement>>.broadcast();
+
+    final cached = LocalDatabase.getCachedInventoryMovements(businessId);
+    if (cached != null) {
+      controller.add(cached);
+    }
+
+    final sub = _db
         .collection('businesses')
         .doc(businessId)
         .collection('inventoryMovements')
         .snapshots()
-        .map((snapshot) {
-      final movements = snapshot.docs.map((doc) => InventoryMovement.fromMap(doc.data(), doc.id)).toList();
-      movements.sort((a, b) {
-        final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-        return bDate.compareTo(aDate);
-      });
-      LocalDatabase.cacheInventoryMovements(businessId, movements);
-      return movements;
-    });
+        .listen(
+      (snapshot) {
+        final movements = snapshot.docs.map((doc) => InventoryMovement.fromMap(doc.data(), doc.id)).toList();
+        movements.sort((a, b) {
+          final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return bDate.compareTo(aDate);
+        });
+        LocalDatabase.cacheInventoryMovements(businessId, movements);
+        controller.add(movements);
+      },
+      onError: controller.addError,
+    );
+
+    controller.onCancel = () => sub.cancel();
+    return controller.stream;
   }
 
   List<InventoryMovement>? getCachedMovements(String businessId) {

@@ -266,18 +266,15 @@ class ButcherStockService {
       }
     }
 
-    // ── BULK QUERY 2: All stock for this store ──
-    final stockSnapshot = await _db
-        .collectionGroup('stockByStore')
-        .where('storeId', isEqualTo: storeId)
-        .get();
+    // ── BULK QUERY 2: All stock for this store (por-ruta, sin collectionGroup) ──
     final stockByProductId = <String, double>{};
-    for (final doc in stockSnapshot.docs) {
-      final data = doc.data();
-      final productId = (data['productId'] as String?) ?? doc.reference.parent.parent?.id ?? '';
-      final quantity = (data['stockQuantity'] ?? 0.0).toDouble();
-      stockByProductId[productId] = quantity;
-    }
+    await Future.wait(productsSnapshot.docs.map((doc) async {
+      final stockDoc = await doc.reference.collection('stockByStore').doc(storeId).get();
+      if (stockDoc.exists) {
+        final data = stockDoc.data() ?? {};
+        stockByProductId[doc.id] = (data['stockQuantity'] ?? 0.0).toDouble();
+      }
+    }));
 
     // ── BULK QUERY 3: Today's sales for this store (once) ──
     final now = DateTime.now();

@@ -12,14 +12,18 @@ class SyncService {
     required Map<String, SyncHandler> handlers,
     Connectivity? connectivity,
     bool autoStart = true,
-  }) : _handlers = handlers {
+    Duration syncInterval = const Duration(seconds: 10),
+  })  : _handlers = handlers,
+        _syncInterval = syncInterval {
     _connectivity = connectivity ?? Connectivity();
     if (autoStart) _setupListener();
   }
 
   late final Connectivity _connectivity;
   final Map<String, SyncHandler> _handlers;
+  final Duration _syncInterval;
   StreamSubscription? _subscription;
+  Timer? _periodicTimer;
   bool _isSyncing = false;
 
   void _setupListener() {
@@ -29,6 +33,23 @@ class SyncService {
         processQueue();
       }
     });
+    _periodicTimer = Timer.periodic(_syncInterval, (_) {
+      if (SyncQueue.pendingCount > 0 && !_isSyncing) {
+        processQueue();
+      }
+    });
+    _initialSync();
+  }
+
+  Future<void> _initialSync() async {
+    try {
+      final results = await _connectivity.checkConnectivity();
+      if (results.any((r) => r != ConnectivityResult.none)) {
+        await processQueue();
+      }
+    } catch (_) {
+      // Sin conexion en el arranque; se reintenta con el timer o al reconectar.
+    }
   }
 
   Future<void> processQueue() async {
@@ -71,5 +92,6 @@ class SyncService {
 
   void dispose() {
     _subscription?.cancel();
+    _periodicTimer?.cancel();
   }
 }

@@ -45,32 +45,48 @@ bool _bool(Map<String, dynamic> data, String key) => data[key] as bool;
 Future<void> _handleAddProduct(Map<String, dynamic> data) async {
   final businessId = _str(data, 'businessId');
   final productRef = _firestore.collection('businesses').doc(businessId).collection('products').doc();
+  final trackStock = _bool(data, 'trackStock');
+  final stockQuantity = _dbl(data, 'stockQuantity');
+  final lowStockAlertQuantity = _dbl(data, 'lowStockAlertQuantity');
   await productRef.set({
+    'businessId': businessId,
     'name': _str(data, 'name'),
+    'description': '',
+    'sku': _str(data, 'ref'),
+    'barcode': '',
     'categoryId': data['categoryId'],
     'categoryName': data['categoryName'],
     'sellBy': _str(data, 'sellBy'),
+    'imageUrl': null,
+    'localImagePath': data['localImagePath'],
     'price': _dbl(data, 'price'),
     'cost': _dbl(data, 'cost'),
     'ref': _str(data, 'ref'),
-    'trackStock': _bool(data, 'trackStock'),
-    'stockQuantity': _dbl(data, 'stockQuantity'),
-    'lowStockAlertQuantity': _dbl(data, 'lowStockAlertQuantity'),
+    'trackStock': trackStock,
+    'stock': trackStock ? stockQuantity.round() : 0,
+    'stockQuantity': trackStock ? stockQuantity : 0,
+    'lowStockAlert': trackStock ? lowStockAlertQuantity.round() : 0,
+    'lowStockAlertQuantity': trackStock ? lowStockAlertQuantity : 0,
     'presentationType': _str(data, 'presentationType'),
     'presentationShape': _str(data, 'presentationShape'),
     'presentationColor': _int(data, 'presentationColor'),
-    'localImagePath': data['localImagePath'],
-    'imageUrl': '',
     'active': true,
     'createdAt': FieldValue.serverTimestamp(),
+    'updatedAt': FieldValue.serverTimestamp(),
   });
   final storeId = data['storeId'];
-  if (storeId != null && _bool(data, 'trackStock')) {
-    await _firestore
-        .collection('businesses').doc(businessId)
-        .collection('stores').doc(storeId as String)
-        .collection('stock').doc(productRef.id)
-        .set({'stockQuantity': _dbl(data, 'stockQuantity'), 'lowStockAlertQuantity': _dbl(data, 'lowStockAlertQuantity')});
+  if (storeId != null && trackStock) {
+    await productRef.collection('stockByStore').doc(storeId as String).set({
+      'businessId': businessId,
+      'storeId': storeId,
+      'productId': productRef.id,
+      'stock': stockQuantity.round(),
+      'stockQuantity': stockQuantity,
+      'lowStockAlert': lowStockAlertQuantity.round(),
+      'lowStockAlertQuantity': lowStockAlertQuantity,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 }
 
@@ -101,6 +117,27 @@ Future<void> _handleUpdateProduct(Map<String, dynamic> data) async {
     if (existing.docs.isNotEmpty) {
       await _firestore.collection('businesses').doc(businessId).collection('products').doc(productId).update({'ref': '${ref}_$productId'});
     }
+  }
+
+  final storeId = data['storeId'];
+  final trackStock = _bool(data, 'trackStock');
+  final stockQuantity = _dbl(data, 'stockQuantity');
+  final lowStockAlertQuantity = _dbl(data, 'lowStockAlertQuantity');
+  if (storeId != null && trackStock) {
+    await _firestore
+        .collection('businesses').doc(businessId)
+        .collection('products').doc(productId)
+        .collection('stockByStore').doc(storeId as String)
+        .set({
+      'businessId': businessId,
+      'storeId': storeId,
+      'productId': productId,
+      'stock': stockQuantity.round(),
+      'stockQuantity': stockQuantity,
+      'lowStockAlert': lowStockAlertQuantity.round(),
+      'lowStockAlertQuantity': lowStockAlertQuantity,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 }
 
@@ -143,19 +180,38 @@ Future<void> _handleCreateSale(Map<String, dynamic> data) async {
   await folioRef.set({'current': currentFolio}, SetOptions(merge: true));
 
   final items = data['items'] as List<dynamic>;
+  final movementsRef = _firestore.collection('businesses').doc(businessId).collection('inventoryMovements');
   for (final item in items) {
     final itemMap = item as Map<String, dynamic>;
     final productId = itemMap['productId'] as String?;
     final quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0;
     if (productId != null && quantity > 0) {
-      await _firestore
+      final stockRef = _firestore
           .collection('businesses').doc(businessId)
-          .collection('stores').doc(storeId)
-          .collection('stock').doc(productId)
-          .set({
-            'stockQuantity': FieldValue.increment(-quantity),
-            'lastUpdated': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
+          .collection('products').doc(productId)
+          .collection('stockByStore').doc(storeId);
+      final stockDoc = await stockRef.get();
+      final previousStock = (stockDoc.data()?['stockQuantity'] as num? ?? 0).toDouble();
+      final newStock = previousStock - quantity;
+      await stockRef.set({
+        'stockQuantity': newStock,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      await movementsRef.add({
+        'businessId': businessId,
+        'storeId': storeId,
+        'productId': productId,
+        'productName': itemMap['name'] ?? '',
+        'type': 'sale',
+        'quantity': -quantity,
+        'previousQuantity': previousStock,
+        'newQuantity': newStock,
+        'difference': -quantity,
+        'reason': 'Venta T-$currentFolio',
+        'saleFolio': 'T-$currentFolio',
+        'employeeId': _str(data, 'employeeId'),
+        'createdAt': FieldValue.serverTimestamp(),
+      });
     }
   }
 }
@@ -230,19 +286,36 @@ Future<void> _handleCancelSale(Map<String, dynamic> data) async {
   });
 
   if (returnInventory) {
+    final movementsRef = _firestore.collection('businesses').doc(businessId).collection('inventoryMovements');
     for (final item in returnItems) {
       final itemMap = item as Map<String, dynamic>;
       final productId = itemMap['productId'] as String?;
       final quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0;
       if (productId != null && quantity > 0) {
-        await _firestore
+        final stockRef = _firestore
             .collection('businesses').doc(businessId)
             .collection('products').doc(productId)
-            .collection('stockByStore').doc(storeId)
-            .set({
-              'stockQuantity': FieldValue.increment(quantity),
-              'updatedAt': FieldValue.serverTimestamp(),
-            }, SetOptions(merge: true));
+            .collection('stockByStore').doc(storeId);
+        final stockDoc = await stockRef.get();
+        final previousStock = (stockDoc.data()?['stockQuantity'] as num? ?? 0).toDouble();
+        final newStock = previousStock + quantity;
+        await stockRef.set({
+          'stockQuantity': newStock,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        await movementsRef.add({
+          'businessId': businessId,
+          'storeId': storeId,
+          'productId': productId,
+          'productName': itemMap['name'] ?? '',
+          'type': 'refund',
+          'previousQuantity': previousStock,
+          'newQuantity': newStock,
+          'difference': quantity,
+          'reason': 'Devolución ${_str(data, 'refundId')}',
+          'employeeId': _str(data, 'refundEmployeeId'),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
       }
     }
   }
@@ -445,16 +518,22 @@ Future<void> _handleAdjustStock(Map<String, dynamic> data) async {
   final businessId = _str(data, 'businessId');
   final storeId = _str(data, 'storeId');
   final productId = _str(data, 'productId');
-  await _firestore
+  final stockRef = _firestore
       .collection('businesses').doc(businessId)
-      .collection('stores').doc(storeId)
-      .collection('stock').doc(productId)
-      .set({'stockQuantity': _dbl(data, 'newQuantity'), 'lastUpdated': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+      .collection('products').doc(productId)
+      .collection('stockByStore').doc(storeId);
+  final stockDoc = await stockRef.get();
+  final previousStock = (stockDoc.data()?['stockQuantity'] as num? ?? 0).toDouble();
+  final newQuantity = _dbl(data, 'newQuantity');
+  await stockRef.set({'stockQuantity': newQuantity, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
   await _firestore.collection('businesses').doc(businessId).collection('inventoryMovements').add({
     'businessId': businessId,
     'storeId': storeId,
     'productId': productId,
-    'difference': _dbl(data, 'newQuantity'),
+    'type': 'adjustment',
+    'previousQuantity': previousStock,
+    'newQuantity': newQuantity,
+    'difference': newQuantity - previousStock,
     'reason': _str(data, 'reason'),
     'employeeId': data['employeeId'],
     'createdAt': FieldValue.serverTimestamp(),

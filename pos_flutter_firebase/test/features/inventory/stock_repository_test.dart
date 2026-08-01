@@ -100,6 +100,10 @@ void main() {
       await db
           .collection('businesses').doc(businessId)
           .collection('products').doc('p1')
+          .set({'name': 'Producto 1', 'active': true});
+      await db
+          .collection('businesses').doc(businessId)
+          .collection('products').doc('p1')
           .collection('stockByStore').doc(storeId)
           .set({
         'businessId': businessId,
@@ -124,6 +128,12 @@ void main() {
         batch.set(
           db
               .collection('businesses').doc(businessId)
+              .collection('products').doc(pid),
+          {'name': 'Producto $pid', 'active': true},
+        );
+        batch.set(
+          db
+              .collection('businesses').doc(businessId)
               .collection('products').doc(pid)
               .collection('stockByStore').doc(storeId),
           {
@@ -138,7 +148,7 @@ void main() {
       await batch.commit();
 
       final stream = service.watchStockByStore(businessId: businessId, storeId: storeId);
-      final result = await stream.first;
+      final result = await stream.firstWhere((m) => m.length >= 2);
       expect(result.length, 2);
       expect(result['p1']!.stockQuantity, 10.0);
       expect(result['p2']!.stockQuantity, 20.0);

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../shared/models/business.dart';
 import '../../../shared/models/store.dart';
 import '../../../features/business/domain/business_repository.dart';
+import '../../../features/business/domain/excel_export_repository.dart';
 import '../../../features/poultry/ui/poultry_config_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -101,9 +102,57 @@ class SettingsScreen extends StatelessWidget {
               },
             ),
           ),
+          const SizedBox(height: 16),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.download_for_offline_outlined),
+              title: const Text('Exportar a Excel'),
+              subtitle: const Text('Toda la información de todas las sucursales'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _exportExcel(context),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _exportExcel(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context, rootNavigator: true);
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return const AlertDialog(
+          title: Text('Exportando...'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Recopilando datos de todas las sucursales.'),
+            ],
+          ),
+        );
+      },
+    );
+
+    try {
+      final result = await context.read<ExcelExportRepository>().exportAllData(
+            businessId: businessId,
+          );
+      if (!context.mounted) return;
+      navigator.pop();
+      messenger.showSnackBar(
+        SnackBar(content: Text('${result.message}\nGuardado en: ${result.path}')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      navigator.pop();
+      messenger.showSnackBar(SnackBar(content: Text('Error al exportar: $e')));
+    }
   }
 
   Future<void> _showBusinessDialog(
