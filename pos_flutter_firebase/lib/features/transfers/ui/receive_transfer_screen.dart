@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../shared/models/employee.dart';
+import '../../../shared/models/store.dart';
+import '../../../shared/providers/app_session_notifier.dart';
 import '../domain/transfer_repository.dart';
 import '../domain/transfer.dart';
 import '../domain/transfer_item.dart';
@@ -159,6 +161,9 @@ class _TransferCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final stores = context.watch<AppSessionNotifier>().session?.stores ?? const <Store>[];
+    String storeName(String? id) => stores.firstWhere((s) => s.id == id, orElse: () => const Store(id: '', name: '', address: '', phone: '', active: false)).name;
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Padding(
@@ -166,8 +171,14 @@ class _TransferCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Envío de ${transfer.id?.substring(0, 6) ?? '...'}',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              'Envío de ${transfer.fromStoreName?.isNotEmpty == true ? transfer.fromStoreName : storeName(transfer.fromStoreId)}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            Text(
+              'Para: ${transfer.toStoreName?.isNotEmpty == true ? transfer.toStoreName : storeName(transfer.toStoreId)}',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 4),
             Text('Artículos: ${transfer.items.length}'),
             ...transfer.items.map((item) => Text(

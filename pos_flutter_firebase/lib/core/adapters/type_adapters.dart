@@ -378,12 +378,16 @@ class InventoryMovementAdapter extends TypeAdapter<InventoryMovement> {
       reason: fields[8] as String,
       employeeId: fields[9] as String,
       createdAt: fields[10] as DateTime?,
+      fromStoreId: fields[11] as String?,
+      toStoreId: fields[12] as String?,
+      fromStoreName: fields[13] as String?,
+      toStoreName: fields[14] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, InventoryMovement obj) {
-    writer.writeByte(11);
+    writer.writeByte(15);
     writer.writeByte(0);
     writer.write(obj.id);
     writer.writeByte(1);
@@ -406,6 +410,14 @@ class InventoryMovementAdapter extends TypeAdapter<InventoryMovement> {
     writer.write(obj.employeeId);
     writer.writeByte(10);
     writer.write(obj.createdAt);
+    writer.writeByte(11);
+    writer.write(obj.fromStoreId);
+    writer.writeByte(12);
+    writer.write(obj.toStoreId);
+    writer.writeByte(13);
+    writer.write(obj.fromStoreName);
+    writer.writeByte(14);
+    writer.write(obj.toStoreName);
   }
 }
 

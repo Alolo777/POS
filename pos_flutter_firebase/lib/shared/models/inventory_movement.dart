@@ -12,6 +12,10 @@ class InventoryMovement {
     required this.employeeId,
     required this.createdAt,
     this.storedDifference,
+    this.fromStoreId,
+    this.toStoreId,
+    this.fromStoreName,
+    this.toStoreName,
   });
 
   final String id;
@@ -26,6 +30,10 @@ class InventoryMovement {
   final String employeeId;
   final DateTime? createdAt;
   final double? storedDifference;
+  final String? fromStoreId;
+  final String? toStoreId;
+  final String? fromStoreName;
+  final String? toStoreName;
 
   double get difference => storedDifference ?? (newQuantity - previousQuantity);
 
@@ -50,6 +58,10 @@ class InventoryMovement {
       employeeId: map['employeeId'] as String? ?? '',
       createdAt: (map['createdAt'] as dynamic)?.toDate(),
       storedDifference: (map['difference'] as num?)?.toDouble(),
+      fromStoreId: map['fromStoreId'] as String?,
+      toStoreId: map['toStoreId'] as String?,
+      fromStoreName: map['fromStoreName'] as String?,
+      toStoreName: map['toStoreName'] as String?,
     );
   }
 
@@ -77,6 +89,8 @@ class InventoryMovement {
         return 'Destazado';
       case 'receiving':
         return 'Recepción';
+      case 'transfer':
+        return 'Traspaso';
       default:
         return type;
     }

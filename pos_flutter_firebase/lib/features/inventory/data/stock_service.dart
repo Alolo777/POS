@@ -53,7 +53,9 @@ class StockService implements StockRepository {
           } else {
             result.remove(productId);
           }
-          controller.add(Map<String, ProductStock>.from(result));
+          final emitted = Map<String, ProductStock>.from(result);
+          controller.add(emitted);
+          LocalDatabase.cacheProductStock(businessId, _mergeStockIntoCache(businessId, storeId, emitted));
         });
         subscriptions.add(sub);
       }
@@ -82,6 +84,18 @@ class StockService implements StockRepository {
       result[stock.productId] = stock;
     }
     return result.isEmpty ? null : result;
+  }
+
+  List<ProductStock> _mergeStockIntoCache(
+    String businessId,
+    String storeId,
+    Map<String, ProductStock> storeStock,
+  ) {
+    final data = LocalDatabase.getCachedProductStock(businessId);
+    return <ProductStock>[
+      if (data != null) ...data.where((s) => s.storeId != storeId),
+      ...storeStock.values,
+    ];
   }
 
   Map<String, ProductStock>? getCachedStock(String businessId) {

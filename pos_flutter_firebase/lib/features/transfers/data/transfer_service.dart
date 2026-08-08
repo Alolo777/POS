@@ -48,6 +48,11 @@ class TransferService implements TransferRepository {
       return;
     }
 
+    final movementsRef = _db
+        .collection('businesses')
+        .doc(businessId)
+        .collection('inventoryMovements');
+
     await _db.runTransaction((transaction) async {
       final transferSnap = await transaction.get(transferRef);
       if (!transferSnap.exists) return;
@@ -55,6 +60,9 @@ class TransferService implements TransferRepository {
 
       final fromStoreId = transferData['fromStoreId'] as String;
       final toStoreId = transferData['toStoreId'] as String;
+      final fromStoreName = transferData['fromStoreName'] as String? ?? '';
+      final toStoreName = transferData['toStoreName'] as String? ?? '';
+      final fromEmployeeId = transferData['fromEmployeeId'] as String? ?? '';
 
       final stockSnapshots = <String, double>{};
       for (final item in filteredItems) {
@@ -95,8 +103,9 @@ class TransferService implements TransferRepository {
             .doc(fromStoreId);
 
         final fromQty = stockSnapshots['from_${item.productId}'] ?? 0;
+        final newFromQty = (fromQty - qty).clamp(0.0, double.infinity);
         transaction.set(fromStockRef, {
-          'stockQuantity': (fromQty - qty).clamp(0.0, double.infinity),
+          'stockQuantity': newFromQty,
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
 
@@ -109,13 +118,50 @@ class TransferService implements TransferRepository {
             .doc(toStoreId);
 
         final toQty = stockSnapshots['to_${item.productId}'] ?? 0;
+        final newToQty = toQty + qty;
         transaction.set(toStockRef, {
           'businessId': businessId,
           'storeId': toStoreId,
           'productId': item.productId,
-          'stockQuantity': toQty + qty,
+          'stockQuantity': newToQty,
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
+
+        transaction.set(movementsRef.doc(), {
+          'businessId': businessId,
+          'storeId': fromStoreId,
+          'fromStoreId': fromStoreId,
+          'toStoreId': toStoreId,
+          'fromStoreName': fromStoreName,
+          'toStoreName': toStoreName,
+          'productId': item.productId,
+          'productName': item.productName,
+          'type': 'transfer',
+          'previousQuantity': fromQty,
+          'newQuantity': newFromQty,
+          'difference': newFromQty - fromQty,
+          'reason': 'Traspaso enviado',
+          'employeeId': fromEmployeeId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        transaction.set(movementsRef.doc(), {
+          'businessId': businessId,
+          'storeId': toStoreId,
+          'fromStoreId': fromStoreId,
+          'toStoreId': toStoreId,
+          'fromStoreName': fromStoreName,
+          'toStoreName': toStoreName,
+          'productId': item.productId,
+          'productName': item.productName,
+          'type': 'transfer',
+          'previousQuantity': toQty,
+          'newQuantity': newToQty,
+          'difference': qty,
+          'reason': 'Traspaso recibido',
+          'employeeId': toEmployeeId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
       }
 
       transaction.update(transferRef, {

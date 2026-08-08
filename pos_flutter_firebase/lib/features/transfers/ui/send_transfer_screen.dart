@@ -106,7 +106,9 @@ class _SendTransferScreenState extends State<SendTransferScreen> {
     final transfer = Transfer(
       businessId: widget.businessId,
       fromStoreId: widget.fromStore.id,
+      fromStoreName: widget.fromStore.name,
       toStoreId: _selectedStore!.id,
+      toStoreName: _selectedStore!.name,
       fromEmployeeId: widget.employee.id,
       items: items,
       createdAt: DateTime.now(),

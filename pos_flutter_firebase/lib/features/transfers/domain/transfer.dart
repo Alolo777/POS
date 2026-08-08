@@ -5,6 +5,8 @@ class Transfer {
   final String businessId;
   final String fromStoreId;
   final String toStoreId;
+  final String? fromStoreName;
+  final String? toStoreName;
   final String fromEmployeeId;
   final String? toEmployeeId;
   final String status;
@@ -18,6 +20,8 @@ class Transfer {
     required this.businessId,
     required this.fromStoreId,
     required this.toStoreId,
+    this.fromStoreName,
+    this.toStoreName,
     required this.fromEmployeeId,
     this.toEmployeeId,
     this.status = 'sent',
@@ -35,6 +39,8 @@ class Transfer {
     'businessId': businessId,
     'fromStoreId': fromStoreId,
     'toStoreId': toStoreId,
+    if (fromStoreName != null) 'fromStoreName': fromStoreName,
+    if (toStoreName != null) 'toStoreName': toStoreName,
     'fromEmployeeId': fromEmployeeId,
     if (toEmployeeId != null) 'toEmployeeId': toEmployeeId,
     'status': status,
@@ -49,6 +55,8 @@ class Transfer {
     businessId: map['businessId'] as String? ?? '',
     fromStoreId: map['fromStoreId'] as String? ?? '',
     toStoreId: map['toStoreId'] as String? ?? '',
+    fromStoreName: map['fromStoreName'] as String?,
+    toStoreName: map['toStoreName'] as String?,
     fromEmployeeId: map['fromEmployeeId'] as String? ?? '',
     toEmployeeId: map['toEmployeeId'] as String?,
     status: map['status'] as String? ?? 'sent',

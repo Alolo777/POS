@@ -87,11 +87,12 @@ class _BackOfficeScreenState extends State<BackOfficeScreen> with SingleTickerPr
       body: TabBarView(
         controller: _tabController,
         children: [
-          _ReportsTab(businessId: widget.businessId, selectedStoreId: _selectedStoreId),
+          _ReportsTab(businessId: widget.businessId, selectedStoreId: _selectedStoreId, stores: widget.stores),
           _InventoryTab(
             businessId: widget.businessId,
             selectedStoreId: _selectedStoreId,
             currentEmployee: widget.currentEmployee,
+            stores: widget.stores,
           ),
           _EmployeesTab(
             businessId: widget.businessId,
@@ -104,10 +105,15 @@ class _BackOfficeScreenState extends State<BackOfficeScreen> with SingleTickerPr
 }
 
 class _ReportsTab extends StatefulWidget {
-  const _ReportsTab({required this.businessId, required this.selectedStoreId});
+  const _ReportsTab({
+    required this.businessId,
+    required this.selectedStoreId,
+    required this.stores,
+  });
 
   final String businessId;
   final String? selectedStoreId;
+  final List<Store> stores;
 
   @override
   State<_ReportsTab> createState() => _ReportsTabState();
@@ -116,6 +122,9 @@ class _ReportsTab extends StatefulWidget {
 class _ReportsTabState extends State<_ReportsTab> {
   late DateTime _startDate;
   late DateTime _endDate;
+
+  String _storeName(String? id) =>
+      widget.stores.firstWhere((s) => s.id == id, orElse: () => const Store(id: '', name: '', address: '', phone: '', active: false)).name;
 
   @override
   void initState() {
@@ -416,7 +425,7 @@ class _ReportsTabState extends State<_ReportsTab> {
                   ...shifts.map((s) => ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text('Cierre ${_formatDate(s.closedAt)}'),
-                    subtitle: Text('Tienda: ${s.storeId} | Efectivo: \$${s.expectedCash.toStringAsFixed(2)}'),
+                    subtitle: Text('Sucursal: ${_storeName(s.storeId)} | Efectivo: \$${s.expectedCash.toStringAsFixed(2)}'),
                     trailing: Text('\$${s.totalSales.toStringAsFixed(2)}'),
                     onTap: () => _showCorteDetail(context, s),
                   )),
@@ -438,7 +447,7 @@ class _ReportsTabState extends State<_ReportsTab> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _detailRow('Tienda', shift.storeId),
+              _detailRow('Sucursal', _storeName(shift.storeId)),
               _detailRow('Empleado', shift.employeeId),
               _detailRow('Abierto', _formatDate(shift.openedAt)),
               _detailRow('Cerrado', _formatDate(shift.closedAt)),
@@ -545,28 +554,46 @@ class _ReportsTabState extends State<_ReportsTab> {
   }
 }
 
-class _InventoryTab extends StatelessWidget {
+class _InventoryTab extends StatefulWidget {
   const _InventoryTab({
     required this.businessId,
     required this.selectedStoreId,
     required this.currentEmployee,
+    required this.stores,
   });
 
   final String businessId;
   final String? selectedStoreId;
   final Employee currentEmployee;
+  final List<Store> stores;
+
+  @override
+  State<_InventoryTab> createState() => _InventoryTabState();
+}
+
+class _InventoryTabState extends State<_InventoryTab> {
+  late final Stream<List<InventoryMovement>> _movementsStream;
+
+  String _storeName(String? id) =>
+      widget.stores.firstWhere((s) => s.id == id, orElse: () => const Store(id: '', name: '', address: '', phone: '', active: false)).name;
+
+  @override
+  void initState() {
+    super.initState();
+    _movementsStream = context.read<InventoryRepository>().watchMovements(businessId: widget.businessId);
+  }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<Product>>(
-      stream: context.read<ProductRepository>().watchProducts(businessId: businessId),
+      stream: context.read<ProductRepository>().watchProducts(businessId: widget.businessId),
       builder: (context, productsSnapshot) {
         if (productsSnapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
         if (productsSnapshot.hasError) return Center(child: Text('Error: ${productsSnapshot.error}'));
         return StreamBuilder<Map<String, ProductStock>>(
-          stream: selectedStoreId == null
+          stream: widget.selectedStoreId == null
               ? const Stream<Map<String, ProductStock>>.empty()
-              : context.read<StockRepository>().watchStockByStore(businessId: businessId, storeId: selectedStoreId!),
+              : context.read<StockRepository>().watchStockByStore(businessId: widget.businessId, storeId: widget.selectedStoreId!),
           builder: (context, stockSnapshot) {
             final stocks = stockSnapshot.data ?? const <String, ProductStock>{};
             final products = (productsSnapshot.data ?? const <Product>[]).map((product) {
@@ -602,7 +629,7 @@ class _InventoryTab extends StatelessWidget {
                 leading: const Icon(Icons.warning_amber),
                 title: const Text('Alertas de bajo stock'),
                 subtitle: Text(
-                  selectedStoreId == null
+                  widget.selectedStoreId == null
                       ? '${lowStock.length} productos requieren revision. Selecciona una sucursal para ajustar inventario.'
                       : '${lowStock.length} productos requieren revision',
                 ),
@@ -615,7 +642,7 @@ class _InventoryTab extends StatelessWidget {
                   title: Text(product.name),
                   subtitle: Text('Stock: ${_formatQuantity(product.stockQuantity)} · Bajo: ${_formatQuantity(product.lowStockAlertQuantity)}'),
                   trailing: FilledButton.tonal(
-                    onPressed: selectedStoreId == null
+                    onPressed: widget.selectedStoreId == null
                         ? null
                         : () => _showAdjustDialog(context, product),
                     child: const Text('Ajustar'),
@@ -626,19 +653,35 @@ class _InventoryTab extends StatelessWidget {
             const SizedBox(height: 16),
             Text('Movimientos recientes', style: Theme.of(context).textTheme.titleMedium),
             StreamBuilder<List<InventoryMovement>>(
-              stream: context.read<InventoryRepository>().watchMovements(businessId: businessId),
+              stream: _movementsStream,
               builder: (context, snapshot) {
                 final movements = (snapshot.data ?? const <InventoryMovement>[])
-                    .where((movement) => selectedStoreId == null || movement.storeId == selectedStoreId)
+                    .where((movement) => widget.selectedStoreId == null || movement.storeId == widget.selectedStoreId)
                     .toList();
-                if (movements.isEmpty) return const Padding(padding: EdgeInsets.all(12), child: Text('Sin movimientos.'));
+                if (movements.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text('Sin movimientos.'),
+                  );
+                }
                 return Column(
                   children: movements.take(20).map((movement) {
+                    String subtitle = movement.typeLabel;
+                    if (movement.reason.isNotEmpty) subtitle = '$subtitle · ${movement.reason}';
+                    if (movement.type == 'transfer') {
+                      final from = (movement.fromStoreName?.isNotEmpty == true)
+                          ? movement.fromStoreName!
+                          : _storeName(movement.fromStoreId);
+                      final to = (movement.toStoreName?.isNotEmpty == true)
+                          ? movement.toStoreName!
+                          : _storeName(movement.toStoreId);
+                      if (from.isNotEmpty && to.isNotEmpty) {
+                        subtitle = '$subtitle\nDe $from → Para $to';
+                      }
+                    }
                     return ListTile(
                       title: Text(movement.productName),
-                      subtitle: Text(
-                        '${movement.typeLabel}${movement.reason.isNotEmpty ? ' · ${movement.reason}' : ''}',
-                      ),
+                      subtitle: Text(subtitle),
                       trailing: Text(movement.difference >= 0 ? '+${_formatQuantity(movement.difference)}' : _formatQuantity(movement.difference)),
                     );
                   }).toList(),
@@ -649,7 +692,7 @@ class _InventoryTab extends StatelessWidget {
             Text('Anomalías de destazado', style: Theme.of(context).textTheme.titleMedium),
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
-                  .collection('businesses').doc(businessId)
+                  .collection('businesses').doc(widget.businessId)
                   .collection('butcherAnomalies')
                   .orderBy('createdAt', descending: true)
                   .snapshots(),
@@ -658,7 +701,7 @@ class _InventoryTab extends StatelessWidget {
                 final docs = snapshot.data?.docs ?? [];
                 final filtered = docs.where((doc) {
                   final data = doc.data() as Map<String, dynamic>;
-                  return selectedStoreId == null || data['storeId'] == selectedStoreId;
+                  return widget.selectedStoreId == null || data['storeId'] == widget.selectedStoreId;
                 }).toList();
                 if (filtered.isEmpty) return const Padding(padding: EdgeInsets.all(12), child: Text('Sin anomalías.'));
                 return Column(
@@ -704,7 +747,7 @@ class _InventoryTab extends StatelessWidget {
   }
 
   Future<void> _showAdjustDialog(BuildContext context, Product product) async {
-    final storeId = selectedStoreId;
+    final storeId = widget.selectedStoreId;
     if (storeId == null) return;
 
     final result = await showDialog<({double quantity, String reason})>(
@@ -715,12 +758,12 @@ class _InventoryTab extends StatelessWidget {
 
     try {
       await context.read<InventoryRepository>().adjustStock(
-        businessId: businessId,
+        businessId: widget.businessId,
         storeId: storeId,
         product: product,
         newQuantity: result.quantity,
         reason: result.reason,
-        employeeId: currentEmployee.id,
+        employeeId: widget.currentEmployee.id,
       );
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Inventario ajustado')));

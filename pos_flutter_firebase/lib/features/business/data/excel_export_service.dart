@@ -6,6 +6,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../domain/excel_export_repository.dart';
 import 'excel_book_builder.dart';
+import 'excel_report_sheets.dart';
+import 'report_definition.dart';
 
 typedef SaveExcel = Future<String> Function(String fileName, Uint8List bytes);
 
@@ -35,12 +37,67 @@ class ExcelExportService implements ExcelExportRepository {
 
   @override
   Future<ExcelExportResult> exportAllData({required String businessId}) async {
+    final data = await _fetchAll(businessId);
+
+    final sheets = buildReportSheets(
+      businessName: data.businessName,
+      currencySymbol: _currencySymbol(data.currency),
+      generatedAt: data.generatedAt,
+      stores: data.stores,
+      products: data.products,
+      stock: data.stock,
+      sales: data.sales,
+      movements: data.movements,
+      employees: data.employees,
+      shifts: data.shifts,
+      transfers: data.transfers,
+      poultryReceivings: data.poultryReceivings,
+      butcheringRecords: data.butcheringRecords,
+      butcherReceipts: data.butcherReceipts,
+      categories: data.categories,
+      discounts: data.discounts,
+      modifiers: data.modifiers,
+    );
+
+    final bytes = buildExcelWorkbook(
+      ReportDefinition(
+        businessName: data.businessName,
+        currencySymbol: _currencySymbol(data.currency),
+        generatedAt: data.generatedAt,
+        sheets: sheets,
+      ),
+    );
+
+    final now = data.generatedAt;
+    final fileName = 'reporte_${_slug(data.businessName)}_${_fileTimestamp(now)}.xlsx';
+
+    late final String path;
+    try {
+      path = await _saveExcel(fileName, bytes);
+    } catch (_) {
+      path = await _saveToAppDirectory(fileName, bytes);
+    }
+
+    return ExcelExportResult(
+      path: path,
+      message: 'Exportación completada con '
+          '${sheets.fold<int>(0, (total, s) => total + s.tables.fold<int>(0, (t, table) => t + table.rows.length))} registros',
+      counts: {
+        for (final s in sheets)
+          s.title: s.tables.fold<int>(0, (t, table) => t + table.rows.length),
+      },
+    );
+  }
+
+  Future<_ReportData> _fetchAll(String businessId) async {
     final businessSnapshot =
         await _db.collection('businesses').doc(businessId).get();
+    final businessData = businessSnapshot.data() ?? {};
     final businessName =
-        (businessSnapshot.data()?['name'] as String?) ?? businessId;
+        (businessData['name'] as String?) ?? businessId;
+    final currency = (businessData['currency'] as String?) ?? 'MXN';
 
-    final storesSnapshot = await _db
+    final stores = await _db
         .collection('businesses')
         .doc(businessId)
         .collection('stores')
@@ -55,110 +112,82 @@ class ExcelExportService implements ExcelExportRepository {
       final stockSnapshot =
           await productDoc.reference.collection('stockByStore').get();
       for (final stockDoc in stockSnapshot.docs) {
-        stock.add(stockDoc.data());
+        stock.add({...stockDoc.data(), 'id': stockDoc.id});
       }
     }
     final sales = await _fetchAllSales(businessId);
-    final movementsSnapshot = await _db
+    final movements = await _db
         .collection('businesses')
         .doc(businessId)
         .collection('inventoryMovements')
         .get();
-    final employeesSnapshot = await _db
+    final employees = await _db
         .collection('businesses')
         .doc(businessId)
         .collection('employees')
         .get();
-    final shiftsSnapshot = await _db
+    final shifts = await _db
         .collection('businesses')
         .doc(businessId)
         .collection('shifts')
         .get();
-    final transfersSnapshot = await _db
+    final transfers = await _db
         .collection('businesses')
         .doc(businessId)
         .collection('transfers')
         .get();
-    final poultrySnapshot = await _db
+    final poultryReceivings = await _db
         .collection('businesses')
         .doc(businessId)
         .collection('poultryReceivings')
         .get();
-    final butcheringSnapshot = await _db
+    final butcheringRecords = await _db
         .collection('businesses')
         .doc(businessId)
         .collection('butchering')
         .get();
-    final butcherReceiptsSnapshot = await _db
+    final butcherReceipts = await _db
         .collection('businesses')
         .doc(businessId)
         .collection('butcherReceipts')
         .get();
-    final categoriesSnapshot = await _db
+    final categories = await _db
         .collection('businesses')
         .doc(businessId)
         .collection('categories')
         .get();
-    final discountsSnapshot = await _db
+    final discounts = await _db
         .collection('businesses')
         .doc(businessId)
         .collection('discounts')
         .get();
-    final modifiersSnapshot = await _db
+    final modifiers = await _db
         .collection('businesses')
         .doc(businessId)
         .collection('modifiers')
         .get();
 
-    final stores = storesSnapshot.docs.map((d) => d.data()).toList();
-    final products = productsSnapshot.docs.map((d) => d.data()).toList();
-    final storeNames = <String, String>{
-      for (final s in stores) (s['id'] as String?) ?? '': (s['name'] as String?) ?? '',
-    };
-    final productNames = <String, String>{
-      for (final p in products) (p['id'] as String?) ?? '': (p['name'] as String?) ?? '',
-    };
-    final employeeNames = <String, String>{};
-    for (final d in employeesSnapshot.docs) {
-      final data = d.data();
-      final id = (data['id'] as String?) ?? d.id;
-      employeeNames[id] = (data['name'] as String?) ?? '';
-    }
+    List<Map<String, dynamic>> withId(QuerySnapshot<Map<String, dynamic>> snap) =>
+        [for (final d in snap.docs) {...d.data(), 'id': d.id}];
 
-    final sheets = <ExcelSheetData>[
-      _storesSheet(stores),
-      _productsSheet(products),
-      _stockSheet(stock, storeNames, productNames),
-      _salesSheet(sales, storeNames, employeeNames),
-      _movementsSheet(movementsSnapshot.docs.map((d) => d.data()).toList(), storeNames, productNames),
-      _employeesSheet(employeesSnapshot.docs.map((d) => d.data()).toList(), storeNames),
-      _shiftsSheet(shiftsSnapshot.docs.map((d) => d.data()).toList(), storeNames, employeeNames),
-      _transfersSheet(transfersSnapshot.docs.map((d) => d.data()).toList(), storeNames, employeeNames),
-      _poultrySheet(poultrySnapshot.docs.map((d) => d.data()).toList(), storeNames, employeeNames),
-      _butcheringSheet(butcheringSnapshot.docs.map((d) => d.data()).toList(), storeNames, employeeNames),
-      _rawSheet('Recibos', butcherReceiptsSnapshot.docs.map((d) => d.data()).toList(), storeNames),
-      _categoriesSheet(categoriesSnapshot.docs.map((d) => d.data()).toList()),
-      _discountsSheet(discountsSnapshot.docs.map((d) => d.data()).toList()),
-      _modifiersSheet(modifiersSnapshot.docs.map((d) => d.data()).toList()),
-    ];
-
-    final bytes = buildExcelWorkbook(sheets);
-
-    final now = DateTime.now();
-    final fileName =
-        'datos_${_slug(businessName)}_${_fileTimestamp(now)}.xlsx';
-
-    late final String path;
-    try {
-      path = await _saveExcel(fileName, bytes);
-    } catch (_) {
-      path = await _saveToAppDirectory(fileName, bytes);
-    }
-
-    return ExcelExportResult(
-      path: path,
-      message: 'Exportación completada con ${sheets.fold<int>(0, (total, s) => total + s.rows.length)} registros',
-      counts: {for (final s in sheets) s.title: s.rows.length},
+    return _ReportData(
+      businessName: businessName,
+      currency: currency,
+      generatedAt: DateTime.now(),
+      stores: withId(stores),
+      products: withId(productsSnapshot),
+      stock: stock,
+      sales: sales,
+      movements: withId(movements),
+      employees: withId(employees),
+      shifts: withId(shifts),
+      transfers: withId(transfers),
+      poultryReceivings: withId(poultryReceivings),
+      butcheringRecords: withId(butcheringRecords),
+      butcherReceipts: withId(butcherReceipts),
+      categories: withId(categories),
+      discounts: withId(discounts),
+      modifiers: withId(modifiers),
     );
   }
 
@@ -173,306 +202,12 @@ class ExcelExportService implements ExcelExportRepository {
       final snapshot = await query.get();
       if (snapshot.docs.isEmpty) break;
       for (final doc in snapshot.docs) {
-        all.add(doc.data());
+        all.add({...doc.data(), 'id': doc.id});
       }
       if (snapshot.docs.length < 1000) break;
       last = snapshot.docs.last;
     }
     return all;
-  }
-
-  ExcelSheetData _storesSheet(List<Map<String, dynamic>> stores) {
-    return ExcelSheetData(
-      title: 'Sucursales',
-      headers: const ['id', 'nombre', 'direccion', 'telefono', 'activa'],
-      rows: [
-        for (final s in stores)
-          [_str(s['id']), _str(s['name']), _str(s['address']), _str(s['phone']), _bool(s['active'])],
-      ],
-    );
-  }
-
-  ExcelSheetData _productsSheet(List<Map<String, dynamic>> products) {
-    return ExcelSheetData(
-      title: 'Productos',
-      headers: const [
-        'id', 'ref', 'nombre', 'categoria', 'venta_por', 'precio', 'costo',
-        'controla_stock', 'stock', 'alerta_stock', 'presentacion_tipo',
-        'presentacion_forma', 'color', 'activo',
-      ],
-      rows: [
-        for (final p in products)
-          [
-            _str(p['id']), _str(p['ref']), _str(p['name']), _str(p['categoryName']),
-            _str(p['sellBy']), _num(p['price']), _num(p['cost']),
-            _bool(p['trackStock']), _num(p['stockQuantity']),
-            _num(p['lowStockAlertQuantity']), _str(p['presentationType']),
-            _str(p['presentationShape']), _int(p['presentationColor']), _bool(p['active']),
-          ],
-      ],
-    );
-  }
-
-  ExcelSheetData _stockSheet(
-    List<Map<String, dynamic>> stock,
-    Map<String, String> storeNames,
-    Map<String, String> productNames,
-  ) {
-    return ExcelSheetData(
-      title: 'Inventario',
-      headers: const ['sucursal', 'producto', 'stock', 'alerta_stock', 'pollos'],
-      rows: [
-        for (final s in stock)
-          [
-            storeNames[_str(s['storeId'])] ?? _str(s['storeId']),
-            productNames[_str(s['productId'])] ?? _str(s['productId']),
-            _num(s['stockQuantity']), _num(s['lowStockAlertQuantity']),
-            _num(s['chickenCount']),
-          ],
-      ],
-    );
-  }
-
-  ExcelSheetData _salesSheet(
-    List<Map<String, dynamic>> sales,
-    Map<String, String> storeNames,
-    Map<String, String> employeeNames,
-  ) {
-    return ExcelSheetData(
-      title: 'Ventas',
-      headers: const [
-        'folio', 'sucursal', 'empleado', 'turno', 'fecha', 'metodo_pago',
-        'tipo', 'estado', 'subtotal', 'descuento', 'impuesto', 'total',
-        'efectivo', 'cambio', 'cancelada', 'razon_cancelacion', 'articulos',
-      ],
-      rows: [
-        for (final s in sales)
-          [
-            _str(s['folio']),
-            storeNames[_str(s['storeId'])] ?? _str(s['storeId']),
-            employeeNames[_str(s['employeeId'])] ?? _str(s['employeeId']),
-            _str(s['shiftId']), _date(s['createdAt'] ?? s['clientCreatedAt']),
-            _str(s['paymentMethod']), _str(s['type']), _str(s['status']),
-            _num(s['subtotal']), _num(s['discountTotal']), _num(s['taxTotal']),
-            _num(s['total']), _num(s['cashReceived']), _num(s['changeDue']),
-            _date(s['cancelledAt']), _str(s['cancelReason']),
-            '${((s['items'] as List?) ?? const []).length}',
-          ],
-      ],
-    );
-  }
-
-  ExcelSheetData _movementsSheet(
-    List<Map<String, dynamic>> movements,
-    Map<String, String> storeNames,
-    Map<String, String> productNames,
-  ) {
-    return ExcelSheetData(
-      title: 'Movimientos',
-      headers: const [
-        'sucursal', 'producto', 'tipo', 'anterior', 'nuevo', 'diferencia',
-        'motivo', 'empleado', 'fecha',
-      ],
-      rows: [
-        for (final m in movements)
-          [
-            storeNames[_str(m['storeId'])] ?? _str(m['storeId']),
-            productNames[_str(m['productId'])] ?? _str(m['productName'] ?? ''),
-            _str(m['type']), _num(m['previousQuantity']), _num(m['newQuantity']),
-            _num(m['storedDifference'] ?? m['difference']), _str(m['reason']),
-            _str(m['employeeId']), _date(m['createdAt']),
-          ],
-      ],
-    );
-  }
-
-  ExcelSheetData _employeesSheet(
-    List<Map<String, dynamic>> employees,
-    Map<String, String> storeNames,
-  ) {
-    return ExcelSheetData(
-      title: 'Empleados',
-      headers: const ['id', 'nombre', 'email', 'rol', 'sucursales', 'activo'],
-      rows: [
-        for (final e in employees)
-          [
-            _str(e['id']), _str(e['name']), _str(e['email']), _str(e['role']),
-            ((e['storeIds'] as List?) ?? const [])
-                .map((id) => storeNames[id.toString()] ?? id.toString())
-                .join(', '),
-            _bool(e['active']),
-          ],
-      ],
-    );
-  }
-
-  ExcelSheetData _shiftsSheet(
-    List<Map<String, dynamic>> shifts,
-    Map<String, String> storeNames,
-    Map<String, String> employeeNames,
-  ) {
-    return ExcelSheetData(
-      title: 'Turnos',
-      headers: const [
-        'sucursal', 'empleado', 'estado', 'apertura', 'cierre', 'ventas_efectivo',
-        'ventas_tarjeta', 'ventas_total', 'devoluciones', 'depositos', 'gastos',
-        'esperado', 'diferencia', 'abrio', 'cerro', 'pollos_recibidos',
-        'kg_recibidos', 'pollos_destazados', 'kg_destazados', 'merma_kg',
-      ],
-      rows: [
-        for (final s in shifts)
-          [
-            storeNames[_str(s['storeId'])] ?? _str(s['storeId']),
-            employeeNames[_str(s['employeeId'])] ?? _str(s['employeeId']),
-            _str(s['status']), _num(s['openingCash']), _num(s['closingCash']),
-            _num(s['cashSales']), _num(s['cardSales']), _num(s['totalSales']),
-            _num(s['cashRefunds']), _num(s['depositsTotal']),
-            _num(s['payoutsTotal']), _num(s['expectedCash']),
-            _num(s['cashDifference']), _date(s['openedAt']), _date(s['closedAt']),
-            _num(s['chickensReceived']), _num(s['kgReceived']),
-            _num(s['chickensButchered']), _num(s['kgButchered']),
-            _num(s['butcherMermaKg']),
-          ],
-      ],
-    );
-  }
-
-  ExcelSheetData _transfersSheet(
-    List<Map<String, dynamic>> transfers,
-    Map<String, String> storeNames,
-    Map<String, String> employeeNames,
-  ) {
-    return ExcelSheetData(
-      title: 'Traspasos',
-      headers: const [
-        'id', 'origen', 'destino', 'empleado_origen', 'empleado_destino',
-        'estado', 'fecha', 'notas', 'articulos',
-      ],
-      rows: [
-        for (final t in transfers)
-          [
-            _str(t['id']),
-            storeNames[_str(t['fromStoreId'])] ?? _str(t['fromStoreId']),
-            storeNames[_str(t['toStoreId'])] ?? _str(t['toStoreId']),
-            employeeNames[_str(t['fromEmployeeId'])] ?? _str(t['fromEmployeeId']),
-            employeeNames[_str(t['toEmployeeId'])] ?? _str(t['toEmployeeId']),
-            _str(t['status']), _date(t['createdAt']), _str(t['notes']),
-            _itemsSummary(t['items']),
-          ],
-      ],
-    );
-  }
-
-  ExcelSheetData _poultrySheet(
-    List<Map<String, dynamic>> receivings,
-    Map<String, String> storeNames,
-    Map<String, String> employeeNames,
-  ) {
-    return ExcelSheetData(
-      title: 'RecibosPollo',
-      headers: const [
-        'sucursal', 'empleado', 'fecha', 'pollos', 'peso_kg', 'peso_promedio', 'estado',
-      ],
-      rows: [
-        for (final r in receivings)
-          [
-            storeNames[_str(r['storeId'])] ?? _str(r['storeId']),
-            employeeNames[_str(r['employeeId'])] ?? _str(r['employeeName'] ?? ''),
-            _date(r['createdAt']), _num(r['totalChickens']),
-            _num(r['totalWeightKg']), _num(r['avgWeightKg']), _str(r['status']),
-          ],
-      ],
-    );
-  }
-
-  ExcelSheetData _butcheringSheet(
-    List<Map<String, dynamic>> records,
-    Map<String, String> storeNames,
-    Map<String, String> employeeNames,
-  ) {
-    return ExcelSheetData(
-      title: 'Destazado',
-      headers: const [
-        'sucursal', 'empleado', 'fecha', 'pollos', 'peso_exacto', 'esperado_kg',
-        'real_kg', 'merma_kg', 'merma_pct', 'estado', 'secciones',
-      ],
-      rows: [
-        for (final r in records)
-          [
-            storeNames[_str(r['storeId'])] ?? _str(r['storeId']),
-            employeeNames[_str(r['employeeId'])] ?? _str(r['employeeName'] ?? ''),
-            _date(r['createdAt']), _num(r['chickenCount']),
-            _num(r['exactWeightKg']), _num(r['totalExpectedKg']),
-            _num(r['totalActualKg']), _num(r['mermaKg']),
-            _num(r['mermaPercent']), _str(r['status']),
-            _sectionsSummary(r['sections']),
-          ],
-      ],
-    );
-  }
-
-  ExcelSheetData _categoriesSheet(List<Map<String, dynamic>> categories) {
-    return ExcelSheetData(
-      title: 'Categorias',
-      headers: const ['id', 'nombre', 'color', 'activa'],
-      rows: [
-        for (final c in categories)
-          [_str(c['id']), _str(c['name']), _int(c['color']), _bool(c['active'])],
-      ],
-    );
-  }
-
-  ExcelSheetData _discountsSheet(List<Map<String, dynamic>> discounts) {
-    return ExcelSheetData(
-      title: 'Descuentos',
-      headers: const ['id', 'nombre', 'tipo', 'valor', 'activo'],
-      rows: [
-        for (final d in discounts)
-          [_str(d['id']), _str(d['name']), _str(d['type']), _num(d['value']), _bool(d['active'])],
-      ],
-    );
-  }
-
-  ExcelSheetData _modifiersSheet(List<Map<String, dynamic>> modifiers) {
-    return ExcelSheetData(
-      title: 'Modificadores',
-      headers: const ['id', 'nombre', 'precio', 'activo'],
-      rows: [
-        for (final m in modifiers)
-          [_str(m['id']), _str(m['name']), _num(m['price']), _bool(m['active'])],
-      ],
-    );
-  }
-
-  ExcelSheetData _rawSheet(
-    String title,
-    List<Map<String, dynamic>> docs,
-    Map<String, String> storeNames,
-  ) {
-    final headers = <String>{};
-    for (final d in docs) {
-      headers.addAll(d.keys);
-    }
-    if (headers.contains('storeId')) {
-      headers.remove('storeId');
-    }
-    final ordered = <String>['storeId', ...headers.toList()..sort()];
-    return ExcelSheetData(
-      title: title,
-      headers: [
-        for (final h in ordered)
-          h == 'storeId' ? 'sucursal' : h,
-      ],
-      rows: [
-        for (final d in docs)
-          [
-            for (final h in ordered)
-              h == 'storeId'
-                  ? (storeNames[_str(d['storeId'])] ?? _str(d['storeId']))
-                  : _typedValue(d[h]),
-          ],
-      ],
-    );
   }
 
   Future<String> _saveToAppDirectory(String fileName, Uint8List bytes) async {
@@ -502,44 +237,65 @@ class ExcelExportService implements ExcelExportRepository {
         .replaceAll(RegExp(r'^_+|_+$'), '');
     return slug.isEmpty ? 'negocio' : slug;
   }
+}
 
-  String _date(Object? value) {
-    if (value is Timestamp) return value.toDate().toIso8601String();
-    if (value is DateTime) return value.toIso8601String();
-    return value?.toString() ?? '';
+String _currencySymbol(String currencyCode) {
+  switch (currencyCode.toUpperCase()) {
+    case 'MXN':
+    case 'USD':
+    case 'CAD':
+    case 'AUD':
+    case 'NZD':
+    case 'HKD':
+    case 'SGD':
+      return r'$';
+    case 'EUR':
+      return '€';
+    case 'GBP':
+      return '£';
+    case 'JPY':
+      return '¥';
+    default:
+      return r'$';
   }
+}
 
-  double _num(Object? value) => value is num ? value.toDouble() : 0;
+class _ReportData {
+  const _ReportData({
+    required this.businessName,
+    required this.currency,
+    required this.generatedAt,
+    required this.stores,
+    required this.products,
+    required this.stock,
+    required this.sales,
+    required this.movements,
+    required this.employees,
+    required this.shifts,
+    required this.transfers,
+    required this.poultryReceivings,
+    required this.butcheringRecords,
+    required this.butcherReceipts,
+    required this.categories,
+    required this.discounts,
+    required this.modifiers,
+  });
 
-  int _int(Object? value) => value is num ? value.toInt() : 0;
-
-  bool _bool(Object? value) => value is bool ? value : false;
-
-  String _str(Object? value) => value?.toString() ?? '';
-
-  Object? _typedValue(Object? value) {
-    if (value is Timestamp) return _date(value);
-    if (value is Map || value is List) return value.toString();
-    return value;
-  }
-
-  String _itemsSummary(Object? items) {
-    final list = items is List ? items : const <Object>[];
-    return list.map((item) {
-      final map = item is Map ? item : const <String, dynamic>{};
-      final name = map['productName'] ?? map['name'] ?? map['productId'] ?? '?';
-      final qty = map['sentQuantity'] ?? map['quantity'] ?? map['count'];
-      return qty == null ? '$name' : '$name x$qty';
-    }).join('; ');
-  }
-
-  String _sectionsSummary(Object? sections) {
-    final list = sections is List ? sections : const <Object>[];
-    return list.map((section) {
-      final map = section is Map ? section : const <String, dynamic>{};
-      final name = map['sectionName'] ?? map['name'] ?? '?';
-      final actual = map['actualKg'];
-      return actual == null ? '$name' : '$name: $actual kg';
-    }).join('; ');
-  }
+  final String businessName;
+  final String currency;
+  final DateTime generatedAt;
+  final List<Map<String, dynamic>> stores;
+  final List<Map<String, dynamic>> products;
+  final List<Map<String, dynamic>> stock;
+  final List<Map<String, dynamic>> sales;
+  final List<Map<String, dynamic>> movements;
+  final List<Map<String, dynamic>> employees;
+  final List<Map<String, dynamic>> shifts;
+  final List<Map<String, dynamic>> transfers;
+  final List<Map<String, dynamic>> poultryReceivings;
+  final List<Map<String, dynamic>> butcheringRecords;
+  final List<Map<String, dynamic>> butcherReceipts;
+  final List<Map<String, dynamic>> categories;
+  final List<Map<String, dynamic>> discounts;
+  final List<Map<String, dynamic>> modifiers;
 }

@@ -18,34 +18,61 @@ class InventoryService implements InventoryRepository {
   final ConnectivityService _connectivityService;
 
   Stream<List<InventoryMovement>> watchMovements({required String businessId}) {
-    final controller = StreamController<List<InventoryMovement>>.broadcast();
+    return Stream.multi((controller) {
+      final movementsRef = _db
+          .collection('businesses')
+          .doc(businessId)
+          .collection('inventoryMovements');
 
-    final cached = LocalDatabase.getCachedInventoryMovements(businessId);
-    if (cached != null) {
-      controller.add(cached);
-    }
-
-    final sub = _db
-        .collection('businesses')
-        .doc(businessId)
-        .collection('inventoryMovements')
-        .snapshots()
-        .listen(
-      (snapshot) {
-        final movements = snapshot.docs.map((doc) => InventoryMovement.fromMap(doc.data(), doc.id)).toList();
+      List<InventoryMovement>? parseSnapshot(List<dynamic> docs) {
+        final movements = <InventoryMovement>[];
+        for (final doc in docs) {
+          try {
+            final data = (doc as QueryDocumentSnapshot<Map<String, dynamic>>).data();
+            movements.add(InventoryMovement.fromMap(data, doc.id));
+          } catch (_) {
+            // Ignorar documentos malformados para no vaciar el listado completo.
+          }
+        }
+        if (movements.isEmpty) return null;
         movements.sort((a, b) {
           final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
           final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
           return bDate.compareTo(aDate);
         });
-        LocalDatabase.cacheInventoryMovements(businessId, movements);
-        controller.add(movements);
-      },
-      onError: controller.addError,
-    );
+        return movements;
+      }
 
-    controller.onCancel = () => sub.cancel();
-    return controller.stream;
+      final cached = LocalDatabase.getCachedInventoryMovements(businessId);
+      if (cached != null && cached.isNotEmpty) {
+        controller.add(cached);
+      }
+
+      // Lectura one-shot: garantiza datos incluso si el canal real-time tarda o falla.
+      unawaited(movementsRef.get().then((snapshot) {
+        final parsed = parseSnapshot(snapshot.docs);
+        if (parsed != null) controller.add(parsed);
+      }).catchError((Object e) {
+        if (!controller.isClosed) controller.addError(e);
+      }));
+
+      final sub = movementsRef.snapshots().listen(
+            (snapshot) {
+              final parsed = parseSnapshot(snapshot.docs);
+              if (parsed != null) {
+                try {
+                  LocalDatabase.cacheInventoryMovements(businessId, parsed);
+                } catch (_) {
+                  // La caché es opcional; no debe bloquear la emisión en vivo.
+                }
+                controller.add(parsed);
+              }
+            },
+            onError: controller.addError,
+          );
+
+      controller.onCancel = () => sub.cancel();
+    });
   }
 
   List<InventoryMovement>? getCachedMovements(String businessId) {
