@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../shared/models/butcher_section.dart';
 import '../../../core/network/connectivity_service.dart';
+import '../../../core/offline/sync_queue.dart';
 import '../domain/butcher_anomaly.dart';
 import '../domain/butcher_record.dart';
 import 'butcher_stock_service.dart';
@@ -42,15 +43,29 @@ class ButcherReceiptService {
     required List<ButcherSection> sections,
     String? sourceStoreId,
   }) async {
-    if (!await _connectivityService.hasConnection()) {
-      throw Exception('Se requiere conexión para registrar entrada de pollos');
-    }
-
     final totalWeight = chickenCount * avgWeight;
     final yields = sections.map((s) {
       final weight = totalWeight * (s.percentage / 100);
       return (name: s.name, weight: weight, percentage: s.percentage);
     }).toList();
+
+    if (!await _connectivityService.hasConnection()) {
+      await SyncQueue.enqueue(type: 'butcherEntry', data: {
+        'businessId': businessId,
+        'storeId': storeId,
+        'employeeId': employeeId,
+        'type': 'chicken',
+        'chickenCount': chickenCount,
+        'avgWeight': avgWeight,
+        'totalWeight': totalWeight,
+        'yields': yields
+            .map((y) => {'name': y.name, 'weight': y.weight, 'percentage': y.percentage})
+            .toList(),
+        'sourceStoreId': sourceStoreId,
+        'createdAt': DateTime.now().toIso8601String(),
+      });
+      return (receiptId: 'OFFLINE-${DateTime.now().millisecondsSinceEpoch}', yields: yields);
+    }
 
     final docRef = _receiptsRef(businessId).doc();
     await docRef.set({
@@ -93,15 +108,27 @@ class ButcherReceiptService {
     required List<({String name, double weight})> parts,
     String? sourceStoreId,
   }) async {
-    if (!await _connectivityService.hasConnection()) {
-      throw Exception('Se requiere conexión para registrar entrada de piezas');
-    }
-
     final totalWeight = parts.fold<double>(0, (sum, p) => sum + p.weight);
     final yields = parts.map((p) {
       final percentage = totalWeight > 0 ? (p.weight / totalWeight) * 100 : 0.0;
       return (name: p.name, weight: p.weight, percentage: percentage);
     }).toList();
+
+    if (!await _connectivityService.hasConnection()) {
+      await SyncQueue.enqueue(type: 'butcherEntry', data: {
+        'businessId': businessId,
+        'storeId': storeId,
+        'employeeId': employeeId,
+        'type': 'parts',
+        'totalWeight': totalWeight,
+        'yields': yields
+            .map((y) => {'name': y.name, 'weight': y.weight, 'percentage': y.percentage})
+            .toList(),
+        'sourceStoreId': sourceStoreId,
+        'createdAt': DateTime.now().toIso8601String(),
+      });
+      return (receiptId: 'OFFLINE-${DateTime.now().millisecondsSinceEpoch}', yields: yields);
+    }
 
     final docRef = _receiptsRef(businessId).doc();
     await docRef.set({
@@ -145,14 +172,25 @@ class ButcherReceiptService {
     required String wholeProductId,
     required List<ButcherSectionResult> sections,
   }) async {
-    if (!await _connectivityService.hasConnection()) {
-      throw Exception('Se requiere conexión para registrar destazado');
-    }
-
     final totalActualKg = sections.fold<double>(0, (sum, s) => sum + s.actualKg);
     final totalExpectedKg = sections.fold<double>(0, (sum, s) => sum + s.expectedKg);
     final mermaKg = (totalExpectedKg - totalActualKg).clamp(0.0, double.infinity);
     final mermaPercent = totalExpectedKg > 0 ? (mermaKg / totalExpectedKg) * 100 : 0.0;
+
+    if (!await _connectivityService.hasConnection()) {
+      await SyncQueue.enqueue(type: 'butchering', data: {
+        'businessId': businessId,
+        'storeId': storeId,
+        'employeeId': employeeId,
+        'employeeName': employeeName,
+        'chickenCount': chickenCount,
+        'exactWeightKg': exactWeightKg,
+        'wholeProductId': wholeProductId,
+        'sections': sections.map((s) => s.toMap()).toList(),
+        'createdAt': DateTime.now().toIso8601String(),
+      });
+      return 'OFFLINE-${DateTime.now().millisecondsSinceEpoch}';
+    }
 
     final sectionProductIds = <String, String>{};
     final sectionNames = <String, String>{};
@@ -355,6 +393,16 @@ class ButcherReceiptService {
     required String reason,
     required String cancelledBy,
   }) async {
+    if (!await _connectivityService.hasConnection()) {
+      await SyncQueue.enqueue(type: 'butcherCancelEntry', data: {
+        'businessId': businessId,
+        'receiptId': receiptId,
+        'reason': reason,
+        'cancelledBy': cancelledBy,
+      });
+      return;
+    }
+
     final doc = await _receiptsRef(businessId).doc(receiptId).get();
     if (!doc.exists) throw Exception('Recibo no encontrado');
 
@@ -406,6 +454,16 @@ class ButcherReceiptService {
     required String reason,
     required String cancelledBy,
   }) async {
+    if (!await _connectivityService.hasConnection()) {
+      await SyncQueue.enqueue(type: 'butcherCancelButchering', data: {
+        'businessId': businessId,
+        'recordId': recordId,
+        'reason': reason,
+        'cancelledBy': cancelledBy,
+      });
+      return;
+    }
+
     final doc = await _butcheringRef(businessId).doc(recordId).get();
     if (!doc.exists) throw Exception('Registro de destazado no encontrado');
 

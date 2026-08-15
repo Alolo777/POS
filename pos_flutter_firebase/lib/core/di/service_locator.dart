@@ -92,8 +92,14 @@ class ServiceLocator {
       connectivityService: connectivityService,
     );
     pdfRepository = PdfService();
-    poultryRepository = PoultryService();
-    transferRepository = TransferService();
+    poultryRepository = PoultryService(
+      connectivityService: connectivityService,
+      stockService: stockRepository as StockService,
+    );
+    transferRepository = TransferService(
+      connectivityService: connectivityService,
+      stockService: stockRepository as StockService,
+    );
   }
 
   List<Provider> get providers => [

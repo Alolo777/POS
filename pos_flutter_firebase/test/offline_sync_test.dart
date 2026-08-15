@@ -414,4 +414,241 @@ void main() {
       expect(ordered[1]['newQuantity'], 12.0);
     });
   });
+
+  group('sync poultry/transfers/butcher handlers', () {
+    test('poultryReceiving handler is idempotent and bumps whole chicken stock', () async {
+      final firestore = FakeFirebaseFirestore();
+      overrideSyncFirestore(firestore);
+
+      await firestore.collection('businesses').doc(businessId)
+          .collection('config').doc('poultry')
+          .set({'wholeProductId': 'whole1'});
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('whole1')
+          .set({'name': 'Pollo Entero', 'active': true, 'trackStock': true});
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('whole1').collection('stockByStore').doc(storeId)
+          .set({'stockQuantity': 0.0, 'chickenCount': 0});
+
+      final handlers = createSyncHandlers();
+      final data = {
+        'businessId': businessId,
+        'storeId': storeId,
+        'employeeId': employeeId,
+        'employeeName': 'Emp',
+        'totalChickens': 10,
+        'totalWeightKg': 25.0,
+        'avgWeightKg': 2.5,
+        'createdAt': DateTime.now().toIso8601String(),
+        'clientOpId': 'rec-1',
+      };
+
+      await handlers['poultryReceiving']!(data);
+      await handlers['poultryReceiving']!(data);
+
+      final receipts = await firestore.collection('businesses').doc(businessId)
+          .collection('poultryReceivings').get();
+      expect(receipts.docs.length, 1);
+
+      final stock = await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('whole1').collection('stockByStore').doc(storeId).get();
+      expect(stock.data()!['stockQuantity'], 25.0);
+      expect(stock.data()!['chickenCount'], 10);
+
+      final movements = await firestore.collection('businesses').doc(businessId)
+          .collection('inventoryMovements').get();
+      expect(movements.docs.length, 1);
+    });
+
+    test('sendTransfer handler is idempotent', () async {
+      final firestore = FakeFirebaseFirestore();
+      overrideSyncFirestore(firestore);
+
+      final handlers = createSyncHandlers();
+      final data = {
+        'businessId': businessId,
+        'fromStoreId': 'storeA',
+        'toStoreId': 'storeB',
+        'fromStoreName': 'A',
+        'toStoreName': 'B',
+        'fromEmployeeId': employeeId,
+        'status': 'sent',
+        'items': [
+          {'productId': 'p1', 'productName': 'X', 'sentQuantity': 5.0},
+        ],
+        'createdAt': DateTime.now().toIso8601String(),
+        'clientOpId': 'tr-1',
+      };
+
+      await handlers['sendTransfer']!(data);
+      await handlers['sendTransfer']!(data);
+
+      final transfers = await firestore.collection('businesses').doc(businessId)
+          .collection('transfers').get();
+      expect(transfers.docs.length, 1);
+      expect(transfers.docs.single.data()['status'], 'sent');
+    });
+
+    test('confirmTransfer handler moves stock once and is idempotent', () async {
+      final firestore = FakeFirebaseFirestore();
+      overrideSyncFirestore(firestore);
+
+      await firestore.collection('businesses').doc(businessId)
+          .collection('transfers').doc('t1').set({
+            'businessId': businessId,
+            'fromStoreId': 'storeA',
+            'toStoreId': 'storeB',
+            'fromEmployeeId': employeeId,
+            'status': 'sent',
+            'items': [
+              {'productId': 'p1', 'productName': 'X', 'sentQuantity': 5.0, 'confirmedQuantity': 3.0},
+            ],
+          });
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').collection('stockByStore').doc('storeA')
+          .set({'stockQuantity': 10.0});
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').collection('stockByStore').doc('storeB')
+          .set({'stockQuantity': 5.0});
+
+      final handlers = createSyncHandlers();
+      final data = {
+        'businessId': businessId,
+        'transferId': 't1',
+        'updatedItems': [
+          {'productId': 'p1', 'productName': 'X', 'sentQuantity': 5.0, 'confirmedQuantity': 3.0},
+        ],
+        'toEmployeeId': 'emp2',
+      };
+
+      await handlers['confirmTransfer']!(data);
+      await handlers['confirmTransfer']!(data);
+
+      final storeA = await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').collection('stockByStore').doc('storeA').get();
+      expect(storeA.data()!['stockQuantity'], 7.0);
+      final storeB = await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').collection('stockByStore').doc('storeB').get();
+      expect(storeB.data()!['stockQuantity'], 8.0);
+
+      final transfer = await firestore.collection('businesses').doc(businessId)
+          .collection('transfers').doc('t1').get();
+      expect(transfer.data()!['status'], 'confirmed');
+
+      final movements = await firestore.collection('businesses').doc(businessId)
+          .collection('inventoryMovements').get();
+      expect(movements.docs.length, 2);
+    });
+
+    test('cancelTransfer handler is idempotent', () async {
+      final firestore = FakeFirebaseFirestore();
+      overrideSyncFirestore(firestore);
+
+      await firestore.collection('businesses').doc(businessId)
+          .collection('transfers').doc('t2').set({'status': 'sent'});
+
+      final handlers = createSyncHandlers();
+      final data = {'businessId': businessId, 'transferId': 't2'};
+
+      await handlers['cancelTransfer']!(data);
+      await handlers['cancelTransfer']!(data);
+
+      final transfer = await firestore.collection('businesses').doc(businessId)
+          .collection('transfers').doc('t2').get();
+      expect(transfer.data()!['status'], 'cancelled');
+    });
+
+    test('butchering handler is idempotent and moves whole/section stock', () async {
+      final firestore = FakeFirebaseFirestore();
+      overrideSyncFirestore(firestore);
+
+      await firestore.collection('businesses').doc(businessId)
+          .collection('config').doc('poultry').set({'wholeProductId': 'whole1'});
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('whole1').set({'name': 'Pollo Entero', 'active': true});
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('whole1').collection('stockByStore').doc(storeId)
+          .set({'stockQuantity': 10.0, 'chickenCount': 3});
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('sec1').set({'name': 'Pechuga', 'active': true});
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('sec1').collection('stockByStore').doc(storeId)
+          .set({'stockQuantity': 0.0});
+
+      final handlers = createSyncHandlers();
+      final data = {
+        'businessId': businessId,
+        'storeId': storeId,
+        'employeeId': employeeId,
+        'employeeName': 'Carn',
+        'chickenCount': 2,
+        'exactWeightKg': 6.0,
+        'wholeProductId': 'whole1',
+        'sections': [
+          {'sectionName': 'Pechuga', 'percentage': 50.0, 'expectedKg': 3.0, 'actualKg': 3.0},
+        ],
+        'createdAt': DateTime.now().toIso8601String(),
+        'clientOpId': 'b-1',
+      };
+
+      await handlers['butchering']!(data);
+      await handlers['butchering']!(data);
+
+      final records = await firestore.collection('businesses').doc(businessId)
+          .collection('butchering').get();
+      expect(records.docs.length, 1);
+
+      final whole = await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('whole1').collection('stockByStore').doc(storeId).get();
+      expect(whole.data()!['stockQuantity'], 4.0);
+      expect(whole.data()!['chickenCount'], 1);
+
+      final section = await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('sec1').collection('stockByStore').doc(storeId).get();
+      expect(section.data()!['stockQuantity'], 3.0);
+
+      final movements = await firestore.collection('businesses').doc(businessId)
+          .collection('inventoryMovements').get();
+      expect(movements.docs.length, 2);
+    });
+
+    test('butcherEntry handler is idempotent and adds yields stock', () async {
+      final firestore = FakeFirebaseFirestore();
+      overrideSyncFirestore(firestore);
+
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('sec1').set({'name': 'Pechuga', 'active': true, 'trackStock': true});
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('sec1').collection('stockByStore').doc(storeId)
+          .set({'stockQuantity': 0.0});
+
+      final handlers = createSyncHandlers();
+      final data = {
+        'businessId': businessId,
+        'storeId': storeId,
+        'employeeId': employeeId,
+        'type': 'chicken',
+        'chickenCount': 1,
+        'avgWeight': 2.0,
+        'totalWeight': 2.0,
+        'yields': [
+          {'name': 'Pechuga', 'weight': 2.0, 'percentage': 100.0},
+        ],
+        'sourceStoreId': null,
+        'createdAt': DateTime.now().toIso8601String(),
+        'clientOpId': 'be-1',
+      };
+
+      await handlers['butcherEntry']!(data);
+      await handlers['butcherEntry']!(data);
+
+      final receipts = await firestore.collection('businesses').doc(businessId)
+          .collection('butcherReceipts').get();
+      expect(receipts.docs.length, 1);
+
+      final stock = await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('sec1').collection('stockByStore').doc(storeId).get();
+      expect(stock.data()!['stockQuantity'], 2.0);
+    });
+  });
 }

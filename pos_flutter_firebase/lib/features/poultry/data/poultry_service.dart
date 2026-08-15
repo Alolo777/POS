@@ -2,15 +2,26 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../../core/offline/local_database.dart';
+import '../../../core/offline/sync_queue.dart';
+import '../../../core/network/connectivity_service.dart';
+import '../../../features/inventory/data/stock_service.dart';
 import '../domain/poultry_repository.dart';
 import '../domain/poultry_config.dart';
 import '../domain/chicken_receiving.dart';
 
 class PoultryService implements PoultryRepository {
-  PoultryService({FirebaseFirestore? firestore})
-      : _db = firestore ?? FirebaseFirestore.instance;
+  PoultryService({
+    FirebaseFirestore? firestore,
+    ConnectivityService? connectivityService,
+    StockService? stockService,
+  })  : _db = firestore ?? FirebaseFirestore.instance,
+        _connectivityService = connectivityService ?? ConnectivityService(),
+        _stockService = stockService;
 
   final FirebaseFirestore _db;
+  final ConnectivityService _connectivityService;
+  final StockService? _stockService;
 
   @override
   Future<PoultryConfig?> getConfig(String businessId) async {
@@ -39,6 +50,31 @@ class PoultryService implements PoultryRepository {
     String businessId,
     ChickenReceiving receiving,
   ) async {
+    if (!await _connectivityService.hasConnection()) {
+      await SyncQueue.enqueue(type: 'poultryReceiving', data: {
+        'businessId': businessId,
+        'storeId': receiving.storeId,
+        'employeeId': receiving.employeeId,
+        'employeeName': receiving.employeeName,
+        'totalChickens': receiving.totalChickens,
+        'totalWeightKg': receiving.totalWeightKg,
+        'avgWeightKg': receiving.avgWeightKg,
+        'createdAt': receiving.createdAt.toIso8601String(),
+      });
+      // Delta local en la caché del pollo entero.
+      final cached = LocalDatabase.getCachedProducts(businessId) ?? [];
+      final whole = cached.where((p) => p.name == 'Pollo Entero' && p.active).toList();
+      if (whole.isNotEmpty) {
+        await _stockService?.applyLocalStockDelta(
+          businessId: businessId,
+          productId: whole.first.id,
+          delta: receiving.totalWeightKg,
+          chickenDelta: receiving.totalChickens,
+        );
+      }
+      return;
+    }
+
     final wholeProductId = await _ensureWholeProduct(
       businessId,
       receiving.storeId,

@@ -1,8 +1,12 @@
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:pos_flutter_firebase/shared/models/butcher_section.dart';
 import 'package:pos_flutter_firebase/core/network/connectivity_service.dart';
+import 'package:pos_flutter_firebase/core/offline/sync_queue.dart';
 import 'package:pos_flutter_firebase/features/butcher/data/butcher_receipt_service.dart';
 import 'package:pos_flutter_firebase/features/butcher/data/butcher_stock_service.dart';
 
@@ -81,7 +85,16 @@ void main() {
       expect(doc.data()?['totalWeight'], 13.0);
     });
 
-    test('throws when offline', () async {
+    test('enqueues operation when offline instead of throwing', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final tempDir = await Directory.systemTemp.createTemp('pos-butcher-offline-test-');
+      Hive.init(tempDir.path);
+      await SyncQueue.initialize();
+      addTearDown(() async {
+        await Hive.close();
+        if (tempDir.existsSync()) await tempDir.delete(recursive: true);
+      });
+
       final db = FakeFirebaseFirestore();
       final stockService = ButcherStockService(firestore: db);
       final service = ButcherReceiptService(
@@ -90,17 +103,18 @@ void main() {
         firestore: db,
       );
 
-      expect(
-        () => service.registerEntry(
-          businessId: businessId,
-          storeId: storeId,
-          employeeId: employeeId,
-          chickenCount: 1,
-          avgWeight: 2.0,
-          sections: [ButcherSection(name: 'X', percentage: 100, sortOrder: 1)],
-        ),
-        throwsA(isA<Exception>()),
+      final result = await service.registerEntry(
+        businessId: businessId,
+        storeId: storeId,
+        employeeId: employeeId,
+        chickenCount: 1,
+        avgWeight: 2.0,
+        sections: [ButcherSection(name: 'X', percentage: 100, sortOrder: 1)],
       );
+
+      expect(result.receiptId, startsWith('OFFLINE-'));
+      expect(SyncQueue.pendingCount, 1);
+      expect(SyncQueue.getPending().single.type, 'butcherEntry');
     });
   });
 

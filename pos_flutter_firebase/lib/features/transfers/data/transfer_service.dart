@@ -2,18 +2,36 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../../core/offline/sync_queue.dart';
+import '../../../core/network/connectivity_service.dart';
+import '../../../features/inventory/data/stock_service.dart';
 import '../domain/transfer_repository.dart';
 import '../domain/transfer.dart';
 import '../domain/transfer_item.dart';
 
 class TransferService implements TransferRepository {
-  TransferService({FirebaseFirestore? firestore})
-      : _db = firestore ?? FirebaseFirestore.instance;
+  TransferService({
+    FirebaseFirestore? firestore,
+    ConnectivityService? connectivityService,
+    StockService? stockService,
+  })  : _db = firestore ?? FirebaseFirestore.instance,
+        _connectivityService = connectivityService ?? ConnectivityService(),
+        _stockService = stockService;
 
   final FirebaseFirestore _db;
+  final ConnectivityService _connectivityService;
+  final StockService? _stockService;
 
   @override
   Future<void> sendTransfer(String businessId, Transfer transfer) async {
+    if (!await _connectivityService.hasConnection()) {
+      await SyncQueue.enqueue(type: 'sendTransfer', data: {
+        'businessId': businessId,
+        ...transfer.toMap(),
+      });
+      return;
+    }
+
     final ref = _db
         .collection('businesses')
         .doc(businessId)
@@ -33,6 +51,26 @@ class TransferService implements TransferRepository {
     List<TransferItem> updatedItems,
     String toEmployeeId,
   ) async {
+    if (!await _connectivityService.hasConnection()) {
+      await SyncQueue.enqueue(type: 'confirmTransfer', data: {
+        'businessId': businessId,
+        'transferId': transferId,
+        'updatedItems': updatedItems.map((e) => e.toMap()).toList(),
+        'toEmployeeId': toEmployeeId,
+      });
+      // Delta local en la sucursal que recibe.
+      for (final item in updatedItems) {
+        final qty = item.confirmedQuantity;
+        if (qty == null || qty <= 0) continue;
+        await _stockService?.applyLocalStockDelta(
+          businessId: businessId,
+          productId: item.productId,
+          delta: qty,
+        );
+      }
+      return;
+    }
+
     final transferRef = _db
         .collection('businesses')
         .doc(businessId)
@@ -175,6 +213,14 @@ class TransferService implements TransferRepository {
 
   @override
   Future<void> cancelTransfer(String businessId, String transferId) async {
+    if (!await _connectivityService.hasConnection()) {
+      await SyncQueue.enqueue(type: 'cancelTransfer', data: {
+        'businessId': businessId,
+        'transferId': transferId,
+      });
+      return;
+    }
+
     await _db
         .collection('businesses')
         .doc(businessId)
