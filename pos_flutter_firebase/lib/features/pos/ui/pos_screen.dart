@@ -13,8 +13,10 @@ import '../../../core/logger/logger_service.dart';
 import '../domain/open_ticket_repository.dart';
 import '../../sales/domain/sale_repository.dart';
 import '../../shift/domain/shift_repository.dart';
+import '../../poultry/domain/poultry_repository.dart';
 import '../domain/category_repository.dart';
 import 'widgets/modifier_dialog.dart';
+import 'widgets/piece_swap_dialog.dart';
 import 'widgets/product_grid.dart';
 import 'widgets/ticket_discount_dialog.dart';
 
@@ -45,6 +47,7 @@ class _PosScreenState extends State<PosScreen> {
   late final CartProvider _cartProvider;
   late final Stream<Shift?> _shiftStream;
   final LoggerService _logger = LoggerService();
+  String? _wholeProductId;
 
   double get _subtotal => _cartProvider.subtotal;
   double get _total => _cartProvider.total;
@@ -61,11 +64,45 @@ class _PosScreenState extends State<PosScreen> {
       storeId: widget.store.id,
       employeeId: widget.employee.id,
     );
+    _loadWholeProductId();
+  }
+
+  Future<void> _loadWholeProductId() async {
+    try {
+      final config = await context
+          .read<PoultryRepository>()
+          .getConfig(widget.businessId);
+      if (!mounted) return;
+      _wholeProductId = config?.wholeProductId;
+    } catch (_) {
+      // Sin config de pollo: no hay producto de pollo entero que detectar.
+    }
   }
 
   Future<void> _addToCart(Product product) async {
-    final quantity = product.sellBy == 'weight' ? await _askWeightQuantity(product) : 1.0;
-    if (quantity == null) return;
+    double? quantity;
+    int? chickenCount;
+    var pieceSwaps = const <PieceSwap>[];
+    if (product.sellBy == 'weight') {
+      final result = await _askWeightQuantity(product);
+      if (result == null || !mounted) return;
+      quantity = result.weight;
+      chickenCount = result.chickenCount;
+      if (product.id == _wholeProductId) {
+        final swaps = await showDialog<List<PieceSwap>>(
+          context: context,
+          builder: (context) => PieceSwapDialog(
+            businessId: widget.businessId,
+            storeId: widget.store.id,
+            wholeProductId: _wholeProductId,
+          ),
+        );
+        if (swaps == null || !mounted) return;
+        pieceSwaps = swaps;
+      }
+    } else {
+      quantity = 1.0;
+    }
 
     if (product.trackStock && product.stockQuantity <= 0) {
       _showMessage('${product.name} no tiene stock disponible');
@@ -82,7 +119,23 @@ class _PosScreenState extends State<PosScreen> {
       return;
     }
 
-    _cartProvider.addToCart(product, quantity);
+    if (chickenCount != null) {
+      final currentChickens = _cartProvider.containsProduct(product.id)
+          ? _cartProvider.cart.firstWhere((item) => item.product.id == product.id).chickenCount ?? 0
+          : 0;
+      final nextChickens = currentChickens + chickenCount;
+      if (product.chickenCount != null && nextChickens > product.chickenCount!) {
+        _showMessage('No hay suficientes pollos enteros de ${product.name}');
+        return;
+      }
+    }
+
+    _cartProvider.addToCart(
+      product,
+      quantity,
+      chickenCount: chickenCount,
+      pieceSwaps: pieceSwaps,
+    );
   }
 
   void _removeFromCart(CartItem item) {
@@ -96,10 +149,13 @@ class _PosScreenState extends State<PosScreen> {
     }
   }
 
-  Future<double?> _askWeightQuantity(Product product) async {
-    return showDialog<double>(
+  Future<({double weight, int? chickenCount})?> _askWeightQuantity(Product product) async {
+    return showDialog<({double weight, int? chickenCount})>(
       context: context,
-      builder: (context) => _WeightQuantityDialog(product: product),
+      builder: (context) => _WeightQuantityDialog(
+        product: product,
+        askChickenCount: product.id == _wholeProductId,
+      ),
     );
   }
 
@@ -320,6 +376,8 @@ class _PosScreenState extends State<PosScreen> {
         quantity: (item['quantity'] as num? ?? 0).toDouble(),
         modifiers: parseModifiers(item['modifiers']),
         discount: (item['discount'] as num? ?? 0).toDouble(),
+        chickenCount: item['chickenCount'] as int?,
+        pieceSwaps: parsePieceSwaps(item['pieceSwaps']),
       );
     }).toList();
   }
@@ -990,9 +1048,13 @@ class _OpenTicketsDialog extends StatelessWidget {
 }
 
 class _WeightQuantityDialog extends StatefulWidget {
-  const _WeightQuantityDialog({required this.product});
+  const _WeightQuantityDialog({
+    required this.product,
+    this.askChickenCount = false,
+  });
 
   final Product product;
+  final bool askChickenCount;
 
   @override
   State<_WeightQuantityDialog> createState() => _WeightQuantityDialogState();
@@ -1000,11 +1062,13 @@ class _WeightQuantityDialog extends StatefulWidget {
 
 class _WeightQuantityDialogState extends State<_WeightQuantityDialog> {
   final _controller = TextEditingController(text: '1');
+  final _chickenCountCtrl = TextEditingController();
   String? _errorMessage;
 
   @override
   void dispose() {
     _controller.dispose();
+    _chickenCountCtrl.dispose();
     super.dispose();
   }
 
@@ -1012,17 +1076,39 @@ class _WeightQuantityDialogState extends State<_WeightQuantityDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text('Cantidad de ${widget.product.name}'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        decoration: InputDecoration(
-          labelText: 'Peso/volumen',
-          helperText: widget.product.trackStock
-              ? 'Disponible: ${_formatQuantity(widget.product.stockQuantity)}'
-              : 'Ejemplo: 0.250, 1.5, 2',
-          errorText: _errorMessage,
-          border: const OutlineInputBorder(),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                labelText: 'Peso/volumen',
+                helperText: widget.product.trackStock
+                    ? 'Disponible: ${_formatQuantity(widget.product.stockQuantity)}'
+                    : 'Ejemplo: 0.250, 1.5, 2',
+                errorText: _errorMessage,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            if (widget.askChickenCount) ...[
+              const SizedBox(height: 16),
+              TextField(
+                controller: _chickenCountCtrl,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: 'Cantidad de pollos',
+                  helperText: widget.product.chickenCount != null
+                      ? 'Pollos disponibles: ${widget.product.chickenCount}'
+                      : 'Número de pollos vendidos',
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
       actions: [
@@ -1043,7 +1129,21 @@ class _WeightQuantityDialogState extends State<_WeightQuantityDialog> {
       return;
     }
 
-    Navigator.pop(context, value);
+    int? chickenCount;
+    if (widget.askChickenCount) {
+      final count = int.tryParse(_chickenCountCtrl.text.trim());
+      if (count == null || count <= 0) {
+        setState(() => _errorMessage = 'Indica cuántos pollos se venden');
+        return;
+      }
+      if (widget.product.chickenCount != null && count > widget.product.chickenCount!) {
+        setState(() => _errorMessage = 'Solo hay ${widget.product.chickenCount} pollos disponibles');
+        return;
+      }
+      chickenCount = count;
+    }
+
+    Navigator.pop(context, (weight: value, chickenCount: chickenCount));
   }
 
   String _formatQuantity(double value) {

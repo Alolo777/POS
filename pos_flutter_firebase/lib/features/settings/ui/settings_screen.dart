@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../shared/models/business.dart';
 import '../../../shared/models/store.dart';
 import '../../../features/business/domain/business_repository.dart';
+import '../../../features/business/domain/backup_repository.dart';
 import '../../../features/business/domain/excel_export_repository.dart';
 import '../../../features/poultry/ui/poultry_config_screen.dart';
 
@@ -112,9 +113,57 @@ class SettingsScreen extends StatelessWidget {
               onTap: () => _exportExcel(context),
             ),
           ),
+          const SizedBox(height: 16),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.backup_outlined),
+              title: const Text('Respaldo local'),
+              subtitle: const Text('Copia de la información guardada en este dispositivo'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _exportLocalBackup(context),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _exportLocalBackup(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context, rootNavigator: true);
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return const AlertDialog(
+          title: Text('Respaldando...'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Copiando la información local de la sucursal.'),
+            ],
+          ),
+        );
+      },
+    );
+
+    try {
+      final path = await context.read<BackupRepository>().exportLocalBackup(
+            businessId: businessId,
+          );
+      if (!context.mounted) return;
+      navigator.pop();
+      messenger.showSnackBar(
+        SnackBar(content: Text('Respaldo guardado en:\n$path')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      navigator.pop();
+      messenger.showSnackBar(SnackBar(content: Text('Error al respaldar: $e')));
+    }
   }
 
   Future<void> _exportExcel(BuildContext context) async {

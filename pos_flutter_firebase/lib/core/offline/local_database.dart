@@ -26,6 +26,8 @@ const _kShifts = 'shifts_v2';
 const _kOpenTickets = 'openTickets_v2';
 const _kInventoryMovements = 'inventoryMovements_v2';
 const _kProductStock = 'productStock_v2';
+const _kPinLockout = 'pinLockout_v1';
+const _kLastSession = 'lastSession_v1';
 
 class LocalDatabase {
   static Future<void> initialize() async {
@@ -43,6 +45,8 @@ class LocalDatabase {
     await Hive.openBox<List>(_kOpenTickets);
     await Hive.openBox<List>(_kInventoryMovements);
     await Hive.openBox<List>(_kProductStock);
+    await Hive.openBox<Map>(_kPinLockout);
+    await Hive.openBox<Map>(_kLastSession);
   }
 
   // ── Products ──
@@ -199,6 +203,48 @@ class LocalDatabase {
     return data.cast<ProductStock>();
   }
 
+  // ── Última sesión (arranque en frío offline) ──
+  static Box<Map> get _lastSession => Hive.box<Map>(_kLastSession);
+
+  /// Guarda el `businessId` y `employeeId` de la última sesión exitosa para
+  /// poder reconstruir el contexto desde la caché si la app abre sin internet.
+  static Future<void> cacheLastSession({
+    required String businessId,
+    required String employeeId,
+  }) async {
+    await _lastSession.put('current', {
+      'businessId': businessId,
+      'employeeId': employeeId,
+    });
+  }
+
+  static Map<String, String>? getLastSession() {
+    final data = _lastSession.get('current');
+    if (data == null) return null;
+    return {
+      'businessId': data['businessId'] as String? ?? '',
+      'employeeId': data['employeeId'] as String? ?? '',
+    };
+  }
+
+  // ── PIN lockout (bloqueo de intentos) ──
+  static Box<Map> get _pinLockout => Hive.box<Map>(_kPinLockout);
+
+  /// Devuelve `{'failures': int, 'lockUntil': int}` para un empleado, o null.
+  static Map<String, dynamic>? getPinLockout(String employeeId) {
+    final data = _pinLockout.get(employeeId);
+    if (data == null) return null;
+    return Map<String, dynamic>.from(data as Map);
+  }
+
+  static Future<void> savePinLockout(String employeeId, Map<String, dynamic> data) async {
+    await _pinLockout.put(employeeId, data);
+  }
+
+  static Future<void> clearPinLockout(String employeeId) async {
+    await _pinLockout.delete(employeeId);
+  }
+
   static Future<void> clearCachedStockForStore(String businessId, String storeId) async {
     final data = _productStock.get(businessId);
     if (data == null) return;
@@ -230,6 +276,8 @@ class LocalDatabase {
       _openTickets.clear(),
       _inventoryMovements.clear(),
       _productStock.clear(),
+      _pinLockout.clear(),
+      _lastSession.clear(),
     ]);
   }
 }

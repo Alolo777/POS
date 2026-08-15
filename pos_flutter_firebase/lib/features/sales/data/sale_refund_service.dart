@@ -70,11 +70,27 @@ class SaleRefundService {
         for (final item in returnItems) {
           final productId = item['productId'] as String;
           final quantity = (item['quantity'] as num).toDouble();
+          final chickenCount = item['chickenCount'] as int?;
           await _stockService.applyLocalStockDelta(
             businessId: businessId,
             productId: productId,
             delta: quantity,
+            chickenDelta: chickenCount,
           );
+          final swapsData = item['pieceSwaps'];
+          if (swapsData is List) {
+            for (final swapData in swapsData) {
+              final swapMap = swapData as Map<String, dynamic>;
+              final swapProductId = swapMap['productId'] as String? ?? '';
+              final delta = (swapMap['delta'] as num? ?? 0).toDouble();
+              if (swapProductId.isEmpty || delta == 0) continue;
+              await _stockService.applyLocalStockDelta(
+                businessId: businessId,
+                productId: swapProductId,
+                delta: delta,
+              );
+            }
+          }
         }
       }
 
@@ -93,6 +109,8 @@ class SaleRefundService {
       final nextRefundNumber = currentRefundNumber + 1;
 
       final stockSnapshots = <String, double>{};
+      final chickenSnapshots = <String, int>{};
+      final swapDeltas = <String, ({String name, double delta})>{};
       if (returnInventory) {
         for (final item in returnItems) {
           final productId = item['productId'] as String;
@@ -103,9 +121,36 @@ class SaleRefundService {
 
           final stockRef = _stockRef(businessId, productId, sale.storeId);
           final stockDoc = await txn.get(stockRef);
-          final currentStock = (stockDoc.data() as Map<String, dynamic>?)?['stockQuantity'] ?? 0.0;
+          final stockData = stockDoc.data() as Map<String, dynamic>?;
+          final currentStock = (stockData?['stockQuantity'] ?? 0.0);
           final newStock = (currentStock as num).toDouble() + (item['quantity'] as num).toDouble();
           stockSnapshots[productId] = newStock;
+          final chickenCount = item['chickenCount'] as int?;
+          if (chickenCount != null) {
+            final currentChickens = stockData?['chickenCount'] as int? ?? 0;
+            chickenSnapshots[productId] = currentChickens + chickenCount;
+          }
+
+          final swapsData = item['pieceSwaps'];
+          if (swapsData is List) {
+            for (final swapData in swapsData) {
+              final swapMap = swapData as Map<String, dynamic>;
+              final swapProductId = swapMap['productId'] as String? ?? '';
+              final delta = (swapMap['delta'] as num? ?? 0).toDouble();
+              if (swapProductId.isEmpty || delta == 0) continue;
+              final current = swapDeltas[swapProductId];
+              swapDeltas[swapProductId] = (
+                name: swapMap['productName'] as String? ?? '',
+                delta: (current?.delta ?? 0) + delta,
+              );
+            }
+          }
+        }
+        for (final productId in swapDeltas.keys) {
+          final stockDoc = await txn.get(_stockRef(businessId, productId, sale.storeId));
+          final stockData = stockDoc.data() as Map<String, dynamic>?;
+          final currentStock = (stockData?['stockQuantity'] ?? 0.0);
+          stockSnapshots[productId] = (currentStock as num).toDouble() + swapDeltas[productId]!.delta;
         }
       }
 
@@ -126,10 +171,15 @@ class SaleRefundService {
           final quantity = (item['quantity'] as num).toDouble();
           final previousStock = newStock - quantity;
 
-          txn.set(_stockRef(businessId, productId, sale.storeId), {
+          final stockUpdate = <String, dynamic>{
             'stockQuantity': newStock,
             'updatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
+          };
+          if (item['chickenCount'] != null) {
+            stockUpdate['chickenCount'] = chickenSnapshots[productId]!;
+          }
+
+          txn.set(_stockRef(businessId, productId, sale.storeId), stockUpdate, SetOptions(merge: true));
 
           txn.set(_movementsRef(businessId).doc(), {
             'businessId': businessId,
@@ -143,6 +193,35 @@ class SaleRefundService {
             'previousStock': previousStock,
             'newStock': newStock,
             'reason': 'Devolución $refundFolio',
+            'saleFolio': sale.folio,
+            'refundFolio': refundFolio,
+            'employeeId': refundEmployeeId,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+        }
+
+        for (final MapEntry(key: swapProductId, value: swapEntry) in swapDeltas.entries) {
+          final newStock = stockSnapshots[swapProductId];
+          if (newStock == null) continue;
+          final previousStock = newStock - swapEntry.delta;
+          txn.set(_stockRef(businessId, swapProductId, sale.storeId), {
+            'stockQuantity': newStock,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+          txn.set(_movementsRef(businessId).doc(), {
+            'businessId': businessId,
+            'productId': swapProductId,
+            'productName': swapEntry.name,
+            'storeId': sale.storeId,
+            'type': 'swap',
+            'difference': swapEntry.delta,
+            'previousQuantity': previousStock,
+            'newQuantity': newStock,
+            'previousStock': previousStock,
+            'newStock': newStock,
+            'reason': swapEntry.delta > 0
+                ? 'Devolución $refundFolio (${swapEntry.name}: regresa pieza entregada)'
+                : 'Devolución $refundFolio (${swapEntry.name}: se retira pieza devuelta)',
             'saleFolio': sale.folio,
             'refundFolio': refundFolio,
             'employeeId': refundEmployeeId,

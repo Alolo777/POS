@@ -1,7 +1,10 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 
@@ -31,6 +34,12 @@ FirebaseOptions _firebaseOptionsFromEnv() {
 SyncService? _syncService;
 late ServiceLocator _serviceLocator;
 
+void _reportToCrashlytics(Future<void> Function() reporter) {
+  reporter().catchError((_) {
+    // Nunca romper el arranque si Crashlytics falla.
+  });
+}
+
 Future<void> main() async {
   runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
@@ -43,6 +52,27 @@ Future<void> main() async {
     } catch (_) {
       // Firebase ya inicializado (google-services.json o sesión previa)
     }
+
+    // App Check: verifica la procedencia de la app. Se activa de forma
+    // defensiva: si la atestación no puede completarse, Firestore y Auth
+    // siguen funcionando mientras la consola no fuerce App Check.
+    try {
+      await FirebaseAppCheck.instance.activate(
+        androidProvider: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+        appleProvider: AppleProvider.appAttest,
+      );
+    } catch (_) {
+      debugPrint('App Check no disponible; continuando sin atestación.');
+    }
+
+    try {
+      _reportToCrashlytics(() async {
+        await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(true);
+      });
+    } catch (_) {
+      // Crashlytics no configurado aún; se ignora.
+    }
+
     await LocalDatabase.initialize();
     await SyncQueue.initialize();
     _syncService = SyncService(handlers: createSyncHandlers());
@@ -50,6 +80,7 @@ Future<void> main() async {
     _serviceLocator = ServiceLocator();
 
     FlutterError.onError = (details) {
+      _reportToCrashlytics(() => FirebaseCrashlytics.instance.recordFlutterError(details));
       FlutterError.presentError(details);
       debugPrint('FLUTTER ERROR: ${details.exception}\n${details.stack}');
     };
@@ -81,6 +112,12 @@ Future<void> main() async {
       ),
     );
   }, (error, stack) {
+    _reportToCrashlytics(() => FirebaseCrashlytics.instance.recordError(
+          error,
+          stack,
+          reason: 'Uncaught zone error',
+          fatal: true,
+        ));
     debugPrint('UNCAUGHT ZONE ERROR: $error\n$stack');
   });
 }

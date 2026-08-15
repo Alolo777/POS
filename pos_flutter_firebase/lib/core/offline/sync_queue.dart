@@ -68,6 +68,18 @@ class SyncQueue {
 
   static Future<void> initialize() async {
     await Hive.openBox<Map>(_boxName);
+    await recoverStuckOps();
+  }
+
+  /// Recupera operaciones que quedaron en estado `syncing` (por ejemplo si la
+  /// app murió a mitad de sincronización) y las devuelve a `pending` para que
+  /// se reintenten. La idempotencia por `clientOpId` evita duplicados.
+  static Future<void> recoverStuckOps() async {
+    final stuck = _box.values.where((map) => map['status'] == 'syncing').toList();
+    for (final item in stuck) {
+      item['status'] = 'pending';
+      await _box.put(item['id'] as String, item);
+    }
   }
 
   static Box<Map> get _box => Hive.box<Map>(_boxName);
@@ -82,6 +94,9 @@ class SyncQueue {
       data: data,
       timestamp: DateTime.now(),
     );
+    // Clave de deduplicación: el handler puede usar esta misma operación como
+    // id de documento para que los reintentos no dupliquen ventas/devoluciones.
+    data['clientOpId'] = operation.id;
     await _box.put(operation.id, operation.toMap());
   }
 

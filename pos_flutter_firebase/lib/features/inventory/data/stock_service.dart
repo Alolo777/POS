@@ -112,6 +112,7 @@ class StockService implements StockRepository {
     required String businessId,
     required String productId,
     required double delta,
+    int? chickenDelta,
   }) async {
     final data = LocalDatabase.getCachedProductStock(businessId);
     if (data == null) return;
@@ -123,6 +124,9 @@ class StockService implements StockRepository {
           storeId: stock.storeId,
           stockQuantity: (stock.stockQuantity + delta).clamp(0.0, double.infinity),
           lowStockAlertQuantity: stock.lowStockAlertQuantity,
+          chickenCount: chickenDelta == null
+              ? stock.chickenCount
+              : (stock.chickenCount ?? 0) + chickenDelta,
         ));
       } else {
         updatedList.add(stock);

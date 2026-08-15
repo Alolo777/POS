@@ -91,6 +91,8 @@ class InventoryMovement {
         return 'Recepción';
       case 'transfer':
         return 'Traspaso';
+      case 'swap':
+        return 'Intercambio';
       default:
         return type;
     }

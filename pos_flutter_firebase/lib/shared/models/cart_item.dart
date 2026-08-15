@@ -42,18 +42,71 @@ List<SelectedModifier> parseModifiers(dynamic modifiersData) {
   return const [];
 }
 
+/// Pieza de destazado intercambiada al vender un pollo entero.
+///
+/// - [direction] == `'out'`: pieza entregada al cliente (se resta del stock).
+/// - [direction] == `'in'`: pieza devuelta por el cliente (se suma al stock).
+class PieceSwap {
+  const PieceSwap({
+    required this.productId,
+    required this.productName,
+    required this.weight,
+    required this.direction,
+  });
+
+  final String productId;
+  final String productName;
+  final double weight;
+  final String direction;
+
+  bool get isOut => direction == 'out';
+
+  Map<String, dynamic> toMap() => {
+    'productId': productId,
+    'productName': productName,
+    'weight': weight,
+    'direction': direction,
+  };
+
+  factory PieceSwap.fromMap(Map<String, dynamic> map) => PieceSwap(
+    productId: map['productId'] as String? ?? '',
+    productName: map['productName'] as String? ?? '',
+    weight: (map['weight'] as num? ?? 0).toDouble(),
+    direction: map['direction'] as String? ?? 'out',
+  );
+}
+
+List<PieceSwap> parsePieceSwaps(dynamic swapsData) {
+  if (swapsData is List) {
+    return swapsData.map((e) {
+      if (e is Map<String, dynamic>) return PieceSwap.fromMap(e);
+      return PieceSwap.fromMap(Map<String, dynamic>.from(e as Map));
+    }).toList();
+  }
+  return const [];
+}
+
 class CartItem {
   const CartItem({
     required this.product,
     required this.quantity,
     this.modifiers = const [],
     this.discount = 0,
+    this.chickenCount,
+    this.pieceSwaps = const [],
   });
 
   final Product product;
   final double quantity;
   final List<SelectedModifier> modifiers;
   final double discount;
+
+  /// Pollos enteros vendidos en esta línea. Solo se usa para el producto
+  /// de pollo entero y permite descontar el conteo de pollos del stock.
+  final int? chickenCount;
+
+  /// Piezas de destazado intercambiadas al vender pollo entero.
+  final List<PieceSwap> pieceSwaps;
 
   String get formattedQuantity {
     if (product.sellBy == 'weight') {
@@ -72,12 +125,16 @@ class CartItem {
     double? quantity,
     List<SelectedModifier>? modifiers,
     double? discount,
+    int? chickenCount,
+    List<PieceSwap>? pieceSwaps,
   }) {
     return CartItem(
       product: product,
       quantity: quantity ?? this.quantity,
       modifiers: modifiers ?? this.modifiers,
       discount: discount ?? this.discount,
+      chickenCount: chickenCount ?? this.chickenCount,
+      pieceSwaps: pieceSwaps ?? this.pieceSwaps,
     );
   }
 
@@ -92,6 +149,8 @@ class CartItem {
       'modifiers': modifiers.map((m) => m.toMap()).toList(),
       'discount': discount,
       'subtotal': subtotal,
+      if (chickenCount != null) 'chickenCount': chickenCount,
+      if (pieceSwaps.isNotEmpty) 'pieceSwaps': pieceSwaps.map((s) => s.toMap()).toList(),
     };
   }
 }

@@ -61,8 +61,9 @@ void main() {
       expect(data['permissions'], ['pos']);
       expect(data['active'], true);
 
-      final hashed = Employee.hashPin('1234');
-      expect(data['pin'], hashed);
+      final hashed = data['pin'] as String;
+      expect(Employee.verifyHashedPin('1234', hashed), isTrue);
+      expect(hashed, startsWith(r'pbkdf2$'));
     });
   });
 
@@ -84,7 +85,7 @@ void main() {
       expect(SyncQueue.pendingCount, 1);
       final pending = SyncQueue.getPending().single;
       expect(pending.type, 'addEmployee');
-      expect(pending.data['pin'], Employee.hashPin('9999'));
+      expect(Employee.verifyHashedPin('9999', pending.data['pin'] as String), isTrue);
     });
   });
 
@@ -209,7 +210,7 @@ void main() {
 
       final doc = await docRef.get();
       expect(doc.data()?['role'], 'admin');
-      expect(doc.data()?['pin'], Employee.hashPin('5678'));
+      expect(Employee.verifyHashedPin('5678', doc.data()?['pin'] as String), isTrue);
       expect(doc.data()?['storeIds'], ['s1', 's2']);
       expect(doc.data()?['permissions'], ['pos', 'admin']);
     });

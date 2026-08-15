@@ -58,6 +58,37 @@ class SaleCreatorService {
               'Stock insuficiente para ${item.product.name}: disponible $cachedStockQty, requerido ${item.quantity}',
             );
           }
+          if (item.chickenCount != null) {
+            final cachedChickens = productStock?.chickenCount ?? 0;
+            if (cachedChickens < item.chickenCount!) {
+              throw StateError(
+                'No hay suficientes pollos para ${item.product.name}: '
+                'disponibles $cachedChickens, requeridos ${item.chickenCount}',
+              );
+            }
+          }
+        }
+      }
+
+      final swapOutNeeded = <String, ({String name, double needed})>{};
+      for (final item in items) {
+        for (final swap in item.pieceSwaps) {
+          final entry = swapOutNeeded[swap.productId];
+          if (swap.isOut) {
+            swapOutNeeded[swap.productId] = (
+              name: swap.productName,
+              needed: (entry?.needed ?? 0) + swap.weight,
+            );
+          }
+        }
+      }
+      for (final MapEntry(key: productId, value: entry) in swapOutNeeded.entries) {
+        final available = cachedStock?[productId]?.stockQuantity ?? 0.0;
+        if (available < entry.needed) {
+          throw StateError(
+            'Stock insuficiente para intercambio de ${entry.name}: '
+            'disponible $available, requerido ${entry.needed}',
+          );
         }
       }
 
@@ -83,10 +114,21 @@ class SaleCreatorService {
 
       for (final item in items) {
         if (item.product.trackStock) {
+          final chickenCount = item.chickenCount;
           await _stockService.applyLocalStockDelta(
             businessId: businessId,
             productId: item.product.id,
             delta: -item.quantity,
+            chickenDelta: chickenCount == null ? null : -chickenCount,
+          );
+        }
+      }
+      for (final item in items) {
+        for (final swap in item.pieceSwaps) {
+          await _stockService.applyLocalStockDelta(
+            businessId: businessId,
+            productId: swap.productId,
+            delta: swap.isOut ? -swap.weight : swap.weight,
           );
         }
       }
@@ -96,11 +138,35 @@ class SaleCreatorService {
 
     final result = await _db.runTransaction((txn) async {
       final stockSnapshots = <String, double>{};
+      final chickenSnapshots = <String, int>{};
       for (final item in items) {
         if (item.product.trackStock) {
           final stockDoc = await txn.get(_stockRef(businessId, item.product.id, storeId));
-          final currentStock = (stockDoc.data() as Map<String, dynamic>?)?['stockQuantity'] ?? 0.0;
+          final stockData = stockDoc.data() as Map<String, dynamic>?;
+          final currentStock = (stockData?['stockQuantity'] ?? 0.0);
           stockSnapshots[item.product.id] = (currentStock as num).toDouble();
+          if (item.chickenCount != null) {
+            final currentChickens = stockData?['chickenCount'] as int? ?? 0;
+            if (currentChickens < item.chickenCount!) {
+              throw StateError(
+                'No hay suficientes pollos para ${item.product.name}: '
+                'disponibles $currentChickens, requeridos ${item.chickenCount}',
+              );
+            }
+            chickenSnapshots[item.product.id] = currentChickens;
+          }
+        }
+      }
+
+      final swapStockSnapshots = <String, double>{};
+      for (final item in items) {
+        for (final swap in item.pieceSwaps) {
+          if (!swapStockSnapshots.containsKey(swap.productId)) {
+            final stockDoc = await txn.get(_stockRef(businessId, swap.productId, storeId));
+            final stockData = stockDoc.data() as Map<String, dynamic>?;
+            swapStockSnapshots[swap.productId] =
+                ((stockData?['stockQuantity'] ?? 0.0) as num).toDouble();
+          }
         }
       }
 
@@ -110,6 +176,27 @@ class SaleCreatorService {
           if (currentStock < item.quantity) {
             throw StateError('Stock insuficiente para ${item.product.name}: disponible $currentStock, requerido ${item.quantity}');
           }
+        }
+      }
+
+      final swapDeltas = <String, ({String name, double delta})>{};
+      for (final item in items) {
+        for (final swap in item.pieceSwaps) {
+          final current = swapDeltas[swap.productId];
+          final delta = swap.isOut ? -swap.weight : swap.weight;
+          swapDeltas[swap.productId] = (
+            name: swap.productName,
+            delta: (current?.delta ?? 0) + delta,
+          );
+        }
+      }
+      for (final MapEntry(key: productId, value: entry) in swapDeltas.entries) {
+        final currentStock = swapStockSnapshots[productId]!;
+        if (currentStock + entry.delta < -0.000001) {
+          throw StateError(
+            'Stock insuficiente para intercambio de ${entry.name}: '
+            'disponible $currentStock',
+          );
         }
       }
 
@@ -123,10 +210,14 @@ class SaleCreatorService {
         if (item.product.trackStock) {
           final stockRef = _stockRef(businessId, item.product.id, storeId);
           final newStock = stockSnapshots[item.product.id]! - item.quantity;
-          txn.set(stockRef, {
+          final stockUpdate = <String, dynamic>{
             'stockQuantity': newStock,
             'updatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
+          };
+          if (item.chickenCount != null) {
+            stockUpdate['chickenCount'] = chickenSnapshots[item.product.id]! - item.chickenCount!;
+          }
+          txn.set(stockRef, stockUpdate, SetOptions(merge: true));
 
           txn.set(_movementsRef(businessId).doc(), {
             'businessId': businessId,
@@ -140,12 +231,43 @@ class SaleCreatorService {
             'previousStock': stockSnapshots[item.product.id],
             'newStock': newStock,
             'difference': -item.quantity,
-            'reason': 'Venta $folio',
+            'reason': item.chickenCount != null
+                ? 'Venta $folio (${item.chickenCount} pollos)'
+                : 'Venta $folio',
             'saleFolio': folio,
             'employeeId': employeeId,
             'createdAt': FieldValue.serverTimestamp(),
           });
         }
+      }
+
+      for (final MapEntry(key: productId, value: entry) in swapDeltas.entries) {
+        final previous = swapStockSnapshots[productId]!;
+        final newStock = previous + entry.delta;
+        txn.set(_stockRef(businessId, productId, storeId), {
+          'stockQuantity': newStock,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        txn.set(_movementsRef(businessId).doc(), {
+          'businessId': businessId,
+          'productId': productId,
+          'productName': entry.name,
+          'storeId': storeId,
+          'type': 'swap',
+          'quantity': entry.delta,
+          'previousQuantity': previous,
+          'newQuantity': newStock,
+          'previousStock': previous,
+          'newStock': newStock,
+          'difference': entry.delta,
+          'reason': entry.delta < 0
+              ? 'Intercambio $folio (${entry.name} entregada)'
+              : 'Intercambio $folio (${entry.name} devuelta)',
+          'saleFolio': folio,
+          'employeeId': employeeId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
       }
 
       txn.set(_counterRef(businessId), {

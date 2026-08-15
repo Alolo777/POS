@@ -90,6 +90,30 @@ void main() {
       await service.applyLocalStockDelta(businessId: businessId, productId: 'unknown', delta: -5.0);
       expect(LocalDatabase.getCachedProductStock(businessId), isNull);
     });
+
+    test('updates chickenCount when chickenDelta is provided', () async {
+      await LocalDatabase.cacheProductStock(businessId, [
+        ProductStock(
+          productId: 'p1',
+          storeId: storeId,
+          stockQuantity: 20.0,
+          lowStockAlertQuantity: 2.0,
+          chickenCount: 10,
+        ),
+      ]);
+
+      final service = StockService(firestore: FakeFirebaseFirestore());
+      await service.applyLocalStockDelta(
+        businessId: businessId,
+        productId: 'p1',
+        delta: -4.5,
+        chickenDelta: -3,
+      );
+
+      final cached = LocalDatabase.getCachedProductStock(businessId)!;
+      expect(cached.single.stockQuantity, 15.5);
+      expect(cached.single.chickenCount, 7);
+    });
   });
 
   group('StockService.watchStockByStore', () {

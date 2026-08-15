@@ -20,6 +20,7 @@ class Product {
     required this.localImagePath,
     required this.active,
     this.stockLoaded = false,
+    this.chickenCount,
   });
 
   final String id;
@@ -40,6 +41,11 @@ class Product {
   final String? localImagePath;
   final bool active;
   final bool stockLoaded;
+
+  /// Pollos enteros disponibles en el stock de la sucursal. Es un dato
+  /// transitorio (no se persiste en el doc del producto) que el POS usa para
+  /// validar ventas de pollo entero.
+  final int? chickenCount;
 
   factory Product.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? {};
@@ -65,5 +71,4 @@ class Product {
       active: data['active'] as bool? ?? true,
       stockLoaded: true,
     );
-  }
-}
+  }}

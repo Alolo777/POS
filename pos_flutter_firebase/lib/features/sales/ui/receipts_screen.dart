@@ -440,10 +440,31 @@ class _ReturnDialogState extends State<_ReturnDialog> {
 
       final lineSubtotal = (original['subtotal'] as num? ?? 0).toDouble();
       final unitSubtotal = originalQuantity <= 0 ? 0 : lineSubtotal / originalQuantity;
+      final lineChickens = (original['chickenCount'] as num? ?? 0).toInt();
+      final returnedChickens = originalQuantity <= 0
+          ? 0
+          : (lineChickens * quantity / originalQuantity).round().clamp(0, lineChickens);
+      final lineSwaps = original['pieceSwaps'];
+      List<Map<String, dynamic>>? reversalSwaps;
+      if (lineSwaps is List && lineSwaps.isNotEmpty && originalQuantity > 0) {
+        final fraction = quantity / originalQuantity;
+        reversalSwaps = lineSwaps.map((s) {
+          final map = s as Map<String, dynamic>;
+          final weight = (map['weight'] as num? ?? 0).toDouble();
+          final isOut = (map['direction'] as String? ?? 'out') == 'out';
+          return {
+            'productId': map['productId'] ?? '',
+            'productName': map['productName'] ?? '',
+            'delta': (isOut ? 1 : -1) * weight * fraction,
+          };
+        }).toList();
+      }
       items.add({
         ...original,
         'quantity': quantity,
         'subtotal': unitSubtotal * quantity,
+        if (lineChickens > 0) 'chickenCount': returnedChickens,
+        if (reversalSwaps != null && reversalSwaps.isNotEmpty) 'pieceSwaps': reversalSwaps,
       });
     }
 

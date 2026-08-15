@@ -8,6 +8,7 @@ import 'package:pos_flutter_firebase/shared/models/product.dart';
 import 'package:pos_flutter_firebase/shared/models/product_stock.dart';
 import 'package:pos_flutter_firebase/core/adapters/type_adapters.dart';
 import 'package:pos_flutter_firebase/core/offline/local_database.dart';
+import 'package:pos_flutter_firebase/core/offline/sync_handlers.dart';
 import 'package:pos_flutter_firebase/core/offline/sync_queue.dart';
 import 'package:pos_flutter_firebase/core/offline/sync_service.dart';
 import 'package:pos_flutter_firebase/core/network/connectivity_service.dart';
@@ -145,6 +146,36 @@ void main() {
     });
   });
 
+  group('SyncQueue recovery', () {
+    test('resets operations stuck in syncing back to pending', () async {
+      await SyncQueue.enqueue(type: 'createSale', data: {'x': 1});
+      final id = SyncQueue.getPending().single.id;
+      await SyncQueue.markSyncing(id);
+
+      expect(SyncQueue.getPending(), isEmpty);
+
+      await SyncQueue.recoverStuckOps();
+
+      expect(SyncQueue.pendingCount, 1);
+      expect(SyncQueue.getPending().single.id, id);
+    });
+
+    test('keeps pending and failed operations untouched', () async {
+      await SyncQueue.enqueue(type: 'a', data: {'v': 1});
+      await SyncQueue.enqueue(type: 'b', data: {'v': 2});
+      final pendingId = SyncQueue.getPending().first.id;
+      final failedId = SyncQueue.getPending().last.id;
+      for (var i = 0; i < 5; i++) {
+        await SyncQueue.markFailed(failedId, error: 'boom');
+      }
+
+      await SyncQueue.recoverStuckOps();
+
+      expect(SyncQueue.getPending().single.id, pendingId);
+      expect(SyncQueue.getFailed().single.id, failedId);
+    });
+  });
+
   group('SyncService', () {
     test('completes successful operations', () async {
       await SyncQueue.enqueue(type: 'ok', data: {'value': 1});
@@ -172,6 +203,139 @@ void main() {
       expect(SyncQueue.failedCount, 1);
       expect(SyncQueue.getFailed().single.lastError, contains('No hay handler registrado'));
       service.dispose();
+    });
+  });
+
+  group('sync idempotency', () {
+    test('createSale handler applied twice creates one sale and one stock decrement', () async {
+      final firestore = FakeFirebaseFirestore();
+      overrideSyncFirestore(firestore);
+
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1')
+          .collection('stockByStore').doc(storeId)
+          .set({'stockQuantity': 10.0});
+
+      final handlers = createSyncHandlers();
+      final data = {
+        'businessId': businessId,
+        'storeId': storeId,
+        'employeeId': employeeId,
+        'shiftId': shiftId,
+        'items': [
+          {
+            'productId': 'p1',
+            'name': 'Cafe',
+            'quantity': 2.0,
+            'subtotal': 20.0,
+            'sellBy': 'unit',
+            'pieceSwaps': <Map<String, dynamic>>[],
+          },
+        ],
+        'subtotal': 20.0,
+        'discountTotal': 0.0,
+        'total': 20.0,
+        'paymentMethod': 'cash',
+        'cashReceived': 20.0,
+        'changeDue': 0.0,
+        'createdByUid': testUid,
+        'folio': 'OFFLINE-123',
+        'createdAt': DateTime.now().toIso8601String(),
+        'clientOpId': 'op-1',
+      };
+
+      await handlers['createSale']!(data);
+      await handlers['createSale']!(data);
+
+      final sales = await firestore
+          .collection('businesses').doc(businessId).collection('sales').get();
+      expect(sales.docs.length, 1);
+
+      final stock = await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').collection('stockByStore').doc(storeId).get();
+      expect(stock.data()!['stockQuantity'], 8.0);
+
+      final movements = await firestore.collection('businesses').doc(businessId)
+          .collection('inventoryMovements').get();
+      expect(movements.docs.length, 1);
+
+      final counter = await firestore.collection('businesses').doc(businessId)
+          .collection('counters').doc('sales').get();
+      expect(counter.data()!['nextSaleNumber'], 2);
+    });
+
+    test('cancelSale handler applied twice creates one refund and restores stock once', () async {
+      final firestore = FakeFirebaseFirestore();
+      overrideSyncFirestore(firestore);
+
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1')
+          .collection('stockByStore').doc(storeId)
+          .set({'stockQuantity': 8.0});
+      await firestore.collection('businesses').doc(businessId)
+          .collection('sales').doc('sale-1')
+          .set({
+            'businessId': businessId,
+            'storeId': storeId,
+            'employeeId': employeeId,
+            'shiftId': shiftId,
+            'folio': 'T-000001',
+            'items': [
+              {
+                'productId': 'p1',
+                'name': 'Cafe',
+                'quantity': 2.0,
+                'subtotal': 20.0,
+                'sellBy': 'unit',
+                'pieceSwaps': <Map<String, dynamic>>[],
+              },
+            ],
+            'total': 20.0,
+            'paymentMethod': 'cash',
+            'status': 'completed',
+            'type': 'sale',
+          });
+
+      final handlers = createSyncHandlers();
+      final data = {
+        'businessId': businessId,
+        'saleId': 'sale-1',
+        'storeId': storeId,
+        'returnItems': [
+          {
+            'productId': 'p1',
+            'name': 'Cafe',
+            'quantity': 2.0,
+            'subtotal': 20.0,
+            'sellBy': 'unit',
+            'pieceSwaps': <Map<String, dynamic>>[],
+          },
+        ],
+        'returnInventory': true,
+        'reason': 'test',
+        'refundEmployeeId': employeeId,
+        'refundShiftId': shiftId,
+        'refundId': 'OFFLINE-REFUND-1',
+        'createdAt': DateTime.now().toIso8601String(),
+        'clientOpId': 'refund-op-1',
+      };
+
+      await handlers['cancelSale']!(data);
+      await handlers['cancelSale']!(data);
+
+      final sales = await firestore
+          .collection('businesses').doc(businessId).collection('sales').get();
+      expect(sales.docs.length, 2);
+      final refunds = sales.docs.where((d) => d.data()['type'] == 'refund');
+      expect(refunds.length, 1);
+
+      final stock = await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').collection('stockByStore').doc(storeId).get();
+      expect(stock.data()!['stockQuantity'], 10.0);
+
+      final original = await firestore.collection('businesses').doc(businessId)
+          .collection('sales').doc('sale-1').get();
+      expect(original.data()!['status'], 'cancelled');
     });
   });
 }

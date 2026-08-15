@@ -86,6 +86,7 @@ class _ProductGridState extends State<ProductGrid> {
                 trackStock: product.trackStock,
                 stockQuantity: stock?.stockQuantity ?? 0,
                 lowStockAlertQuantity: stock?.lowStockAlertQuantity ?? product.lowStockAlertQuantity,
+                chickenCount: stock?.chickenCount,
                 presentationType: product.presentationType,
                 presentationShape: product.presentationShape,
                 presentationColor: product.presentationColor,

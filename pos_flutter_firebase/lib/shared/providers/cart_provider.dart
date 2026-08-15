@@ -45,13 +45,31 @@ class CartProvider extends ChangeNotifier {
     }
   }
 
-  void addToCart(Product product, double quantity) {
+  void addToCart(
+    Product product,
+    double quantity, {
+    int? chickenCount,
+    List<PieceSwap>? pieceSwaps,
+  }) {
     final existingIndex = _cart.indexWhere((item) => item.product.id == product.id);
     if (existingIndex >= 0) {
       final existing = _cart[existingIndex];
-      _cart[existingIndex] = existing.copyWith(quantity: existing.quantity + quantity);
+      _cart[existingIndex] = existing.copyWith(
+        quantity: existing.quantity + quantity,
+        chickenCount: chickenCount == null
+            ? existing.chickenCount
+            : (existing.chickenCount ?? 0) + chickenCount,
+        pieceSwaps: pieceSwaps == null
+            ? existing.pieceSwaps
+            : [...existing.pieceSwaps, ...pieceSwaps],
+      );
     } else {
-      _cart.add(CartItem(product: product, quantity: quantity));
+      _cart.add(CartItem(
+        product: product,
+        quantity: quantity,
+        chickenCount: chickenCount,
+        pieceSwaps: pieceSwaps ?? const [],
+      ));
     }
     notifyListeners();
   }

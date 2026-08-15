@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: flutter test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Prepare .env (asset requerido por la app)
+        run: |
+          cat > .env <<'EOF'
+          FIREBASE_API_KEY=
+          FIREBASE_APP_ID=
+          FIREBASE_MESSAGING_SENDER_ID=
+          FIREBASE_PROJECT_ID=
+          FIREBASE_AUTH_DOMAIN=
+          FIREBASE_STORAGE_BUCKET=
+          FIREBASE_MEASUREMENT_ID=
+          EOF
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: flutter analyze
+        run: flutter analyze
+
+      - name: flutter test
+        run: flutter test
+
+      # El release requiere el keystore (secreto, no versionado); se valida la
+      # compilación nativa con un APK debug.
+      - name: flutter build apk (debug)
+        run: flutter build apk --debug

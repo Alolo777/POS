@@ -66,8 +66,8 @@ void main() {
       expect(empData['permissions'], ['*']);
       expect(empData['active'], true);
 
-      final hashed = Employee.hashPin('0000');
-      expect(empData['pin'], hashed);
+      expect(Employee.verifyHashedPin('0000', empData['pin'] as String), isTrue);
+      expect(empData['pin'] as String, startsWith(r'pbkdf2$'));
     });
 
     test('skips if user document already exists', () async {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/offline/local_database.dart';
 import '../../../shared/models/employee.dart';
 import '../../../shared/models/store.dart';
 
@@ -26,6 +27,9 @@ class EmployeePinScreen extends StatefulWidget {
 }
 
 class _EmployeePinScreenState extends State<EmployeePinScreen> {
+  static const _maxAttempts = 5;
+  static const _lockoutDuration = Duration(minutes: 1);
+
   Employee? _selectedEmployee;
   String _pin = '';
   String? _errorMessage;
@@ -137,14 +141,41 @@ class _EmployeePinScreenState extends State<EmployeePinScreen> {
       setState(() => _errorMessage = 'Selecciona un empleado');
       return;
     }
-    if (!employee.verifyPin(_pin)) {
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final lock = LocalDatabase.getPinLockout(employee.id);
+    final lockUntil = lock?['lockUntil'] as int? ?? 0;
+    if (lockUntil > now) {
+      final seconds = ((lockUntil - now) / 1000).ceil();
       setState(() {
         _pin = '';
-        _errorMessage = 'PIN incorrecto';
+        _errorMessage = 'Demasiados intentos. Espera $seconds s para volver a intentar';
       });
       return;
     }
 
+    if (!employee.verifyPin(_pin)) {
+      final failures = (lock?['failures'] as int? ?? 0) + 1;
+      setState(() {
+        _pin = '';
+        if (failures >= _maxAttempts) {
+          LocalDatabase.savePinLockout(employee.id, {
+            'failures': 0,
+            'lockUntil': now + _lockoutDuration.inMilliseconds,
+          });
+          _errorMessage = 'Demasiados intentos. PIN bloqueado por 1 minuto';
+        } else {
+          LocalDatabase.savePinLockout(employee.id, {
+            'failures': failures,
+            'lockUntil': 0,
+          });
+          _errorMessage = 'PIN incorrecto (${_maxAttempts - failures} intentos restantes)';
+        }
+      });
+      return;
+    }
+
+    LocalDatabase.clearPinLockout(employee.id);
     widget.onUnlocked(employee);
   }
 
