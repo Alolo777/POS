@@ -772,25 +772,49 @@ Future<void> _handleAdjustStock(Map<String, dynamic> data) async {
   final businessId = _str(data, 'businessId');
   final storeId = _str(data, 'storeId');
   final productId = _str(data, 'productId');
-  final stockRef = _firestore
-      .collection('businesses').doc(businessId)
-      .collection('products').doc(productId)
-      .collection('stockByStore').doc(storeId);
-  final stockDoc = await stockRef.get();
-  final previousStock = (stockDoc.data()?['stockQuantity'] as num? ?? 0).toDouble();
   final newQuantity = _dbl(data, 'newQuantity');
-  await stockRef.set({'stockQuantity': newQuantity, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
-  await _firestore.collection('businesses').doc(businessId).collection('inventoryMovements').add({
-    'businessId': businessId,
-    'storeId': storeId,
-    'productId': productId,
-    'type': 'adjustment',
-    'previousQuantity': previousStock,
-    'newQuantity': newQuantity,
-    'difference': newQuantity - previousStock,
-    'reason': _str(data, 'reason'),
-    'employeeId': data['employeeId'],
-    'createdAt': FieldValue.serverTimestamp(),
+  final reason = _optString(data, 'reason');
+  final trimmedReason = (reason == null || reason.trim().isEmpty) ? 'Ajuste manual' : reason.trim();
+
+  final productRef = _firestore
+      .collection('businesses').doc(businessId)
+      .collection('products').doc(productId);
+  final stockRef = productRef.collection('stockByStore').doc(storeId);
+  final movementRef = _firestore
+      .collection('businesses').doc(businessId)
+      .collection('inventoryMovements').doc();
+
+  await _firestore.runTransaction((txn) async {
+    final productDoc = await txn.get(productRef);
+    if (!productDoc.exists) {
+      throw StateError('El producto ya no existe');
+    }
+    final stockDoc = await txn.get(stockRef);
+    final stockData = stockDoc.data() as Map<String, dynamic>?;
+    final previousStock = ((stockData?['stockQuantity'] ?? 0.0) as num).toDouble();
+    final difference = newQuantity - previousStock;
+
+    txn.set(stockRef, {
+      'businessId': businessId,
+      'storeId': storeId,
+      'productId': productId,
+      'stock': newQuantity.round(),
+      'stockQuantity': newQuantity,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    txn.set(movementRef, {
+      'businessId': businessId,
+      'storeId': storeId,
+      'productId': productId,
+      'productName': productDoc.data()?['name'] ?? '',
+      'type': 'adjustment',
+      'previousQuantity': previousStock,
+      'newQuantity': newQuantity,
+      'difference': difference,
+      'reason': trimmedReason,
+      'employeeId': data['employeeId'],
+      'createdAt': FieldValue.serverTimestamp(),
+    });
   });
 }
 

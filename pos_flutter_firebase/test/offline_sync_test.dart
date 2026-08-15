@@ -338,4 +338,80 @@ void main() {
       expect(original.data()!['status'], 'cancelled');
     });
   });
+
+  group('sync adjustStock handler', () {
+    test('applies adjustment transactionally with movement', () async {
+      final firestore = FakeFirebaseFirestore();
+      overrideSyncFirestore(firestore);
+
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').set({'name': 'Pollo', 'businessId': businessId});
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').collection('stockByStore').doc(storeId)
+          .set({'stockQuantity': 5.0, 'stock': 5});
+
+      final handlers = createSyncHandlers();
+      final data = {
+        'businessId': businessId,
+        'storeId': storeId,
+        'productId': 'p1',
+        'newQuantity': 8.0,
+        'reason': 'Conteo',
+        'employeeId': employeeId,
+      };
+
+      await handlers['adjustStock']!(data);
+
+      final stock = await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').collection('stockByStore').doc(storeId).get();
+      expect(stock.data()!['stockQuantity'], 8.0);
+      expect(stock.data()!['stock'], 8);
+
+      final movements = await firestore.collection('businesses').doc(businessId)
+          .collection('inventoryMovements').get();
+      expect(movements.docs.length, 1);
+      final m = movements.docs.single.data();
+      expect(m['type'], 'adjustment');
+      expect(m['previousQuantity'], 5.0);
+      expect(m['newQuantity'], 8.0);
+      expect(m['difference'], 3.0);
+      expect(m['productName'], 'Pollo');
+      expect(m['reason'], 'Conteo');
+    });
+
+    test('applies sequential adjustments reading latest stock', () async {
+      final firestore = FakeFirebaseFirestore();
+      overrideSyncFirestore(firestore);
+
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').set({'name': 'Pollo', 'businessId': businessId});
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').collection('stockByStore').doc(storeId)
+          .set({'stockQuantity': 10.0});
+
+      final handlers = createSyncHandlers();
+      final data = {
+        'businessId': businessId,
+        'storeId': storeId,
+        'productId': 'p1',
+        'newQuantity': 15.0,
+        'reason': 'Ajuste manual',
+        'employeeId': employeeId,
+      };
+
+      await handlers['adjustStock']!(data);
+      data['newQuantity'] = 12.0;
+      await handlers['adjustStock']!(data);
+
+      final movements = await firestore.collection('businesses').doc(businessId)
+          .collection('inventoryMovements').get();
+      expect(movements.docs.length, 2);
+      final ordered = movements.docs.map((d) => d.data()).toList()
+        ..sort((a, b) => (a['previousQuantity'] as num).compareTo((b['previousQuantity'] as num)));
+      expect(ordered[0]['previousQuantity'], 10.0);
+      expect(ordered[0]['newQuantity'], 15.0);
+      expect(ordered[1]['previousQuantity'], 15.0);
+      expect(ordered[1]['newQuantity'], 12.0);
+    });
+  });
 }
