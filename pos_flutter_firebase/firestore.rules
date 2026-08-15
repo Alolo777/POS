@@ -84,13 +84,6 @@ service cloud.firestore {
       return request.resource.data.businessId == businessId;
     }
 
-    match /{path=**}/stockByStore/{storeId} {
-      allow read: if resource.data.businessId != null
-        && canReadBusiness(resource.data.businessId);
-      allow create, update: if request.resource.data.businessId != null
-        && (canManageCatalog(request.resource.data.businessId) || canSell(request.resource.data.businessId));
-    }
-
     match /users/{userId} {
       allow read: if signedIn()
         && userId == request.auth.uid;
@@ -190,6 +183,13 @@ service cloud.firestore {
         allow read: if canReadBusiness(businessId);
         allow create, update: if canSell(businessId)
           && hasBusinessId(businessId);
+
+        match /cashMovements/{movementId} {
+          allow read: if canReadBusiness(businessId);
+          // Los movimientos de caja modernos van en el array del doc del turno;
+          // la subcoleccion se mantiene como compatibilidad con datos antiguos.
+          allow create, update: if canSell(businessId);
+        }
       }
 
       match /customers/{customerId} {
