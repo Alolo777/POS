@@ -1056,12 +1056,23 @@ class _EmployeeDialog extends StatefulWidget {
 }
 
 class _EmployeeDialogState extends State<_EmployeeDialog> {
+  static const _featurePermissions = <(String, String)>[
+    ('pos', 'Venta (POS)'),
+    ('receipts', 'Recibos / historial'),
+    ('products', 'Productos'),
+    ('shift', 'Turnos / caja'),
+    ('butcher', 'Destazar'),
+    ('poultry', 'Recibir pollo'),
+    ('transfers', 'Enviar / recibir mercancía'),
+  ];
+
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _pinController = TextEditingController();
   late String _role;
   late bool _active;
   late final Set<String> _storeIds;
+  late Set<String> _permissions;
   String? _errorMessage;
 
   @override
@@ -1073,6 +1084,9 @@ class _EmployeeDialogState extends State<_EmployeeDialog> {
     _role = employee?.role ?? 'cashier';
     _active = employee?.active ?? true;
     _storeIds = {...(employee?.storeIds ?? widget.stores.map((store) => store.id))};
+    _permissions = employee != null
+        ? {...employee.permissions}
+        : {..._permissionsForRole(_role)};
   }
 
   @override
@@ -1139,6 +1153,28 @@ class _EmployeeDialogState extends State<_EmployeeDialog> {
                     _storeIds.remove(store.id);
                   }
                 }),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Funcionalidades', style: Theme.of(context).textTheme.titleSmall),
+            ),
+            ..._featurePermissions.map(
+              (entry) => CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text(entry.$2),
+                value: _permissions.contains(entry.$1),
+                onChanged: _role == 'admin'
+                    ? null
+                    : (value) => setState(() {
+                        if (value == true) {
+                          _permissions.add(entry.$1);
+                        } else {
+                          _permissions.remove(entry.$1);
+                        }
+                      }),
               ),
             ),
             SwitchListTile(
@@ -1215,7 +1251,7 @@ class _EmployeeDialogState extends State<_EmployeeDialog> {
         role: _role,
         pin: pin,
         storeIds: _storeIds.toList(),
-        permissions: _permissionsForRole(_role),
+        permissions: _role == 'admin' ? ['*'] : _permissions.toList(),
         active: _active,
       ),
     );

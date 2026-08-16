@@ -241,7 +241,8 @@ class _HomeScreenState extends State<HomeScreen> {
         const _NavItem('products', Icons.inventory_2, 'Productos'),
       if (employee.isManager || employee.isAdmin || employee.hasPermission('shift'))
         const _NavItem('shift', Icons.account_balance_wallet, 'Turno'),
-      if (employee.isAdmin) const _NavItem('poultry', Icons.egg_alt, 'Recibir Pollo'),
+      if (employee.isAdmin || employee.hasPermission('poultry'))
+        const _NavItem('poultry', Icons.egg_alt, 'Recibir Pollo'),
       if (employee.isAdmin || employee.hasPermission('butcher'))
         const _NavItem('butcher', Icons.set_meal, 'Destazar'),
       if (employee.isAdmin || employee.isManager || employee.hasPermission('transfers')) ...const [
