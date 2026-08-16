@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../core/offline/local_database.dart';
@@ -14,7 +15,33 @@ class BackupService implements BackupRepository {
   final FirebaseFirestore _db;
 
   Future<String> exportLocalBackup({required String businessId}) async {
+    final backup = await _buildBackupMap(businessId: businessId);
     final now = DateTime.now();
+
+    final dir = await _backupDirectory();
+    final file = File('${dir.path}/backup_${businessId}_${_fileTimestamp(now)}.json');
+    await file.writeAsString(const JsonEncoder.withIndent('  ').convert(backup));
+    return file.path;
+  }
+
+  Future<String> uploadLocalBackupToCloud({required String businessId}) async {
+    final backup = await _buildBackupMap(businessId: businessId);
+    final now = DateTime.now();
+    final path = 'backups/$businessId/backup_${_fileTimestamp(now)}.json';
+
+    final ref = FirebaseStorage.instance.ref(path);
+    final metadata = SettableMetadata(
+      contentType: 'application/json',
+      customMetadata: {'businessId': businessId, 'exportedAt': now.toIso8601String()},
+    );
+    await ref.putData(
+      utf8.encode(const JsonEncoder().convert(backup)),
+      metadata,
+    );
+    return path;
+  }
+
+  Future<Map<String, dynamic>> _buildBackupMap({required String businessId}) async {
     final business = LocalDatabase.getCachedBusiness(businessId);
     final stores = LocalDatabase.getCachedStores(businessId);
     final employees = LocalDatabase.getCachedEmployees(businessId);
@@ -28,10 +55,10 @@ class BackupService implements BackupRepository {
     final openTickets = LocalDatabase.getCachedOpenTickets(businessId);
     final inventoryMovements = LocalDatabase.getCachedInventoryMovements(businessId);
 
-    final backup = {
+    return {
       'schemaVersion': 1,
       'businessId': businessId,
-      'exportedAt': now.toIso8601String(),
+      'exportedAt': DateTime.now().toIso8601String(),
       'localCache': {
         'business': business != null ? {
           'id': business.id, 'name': business.name, 'currency': business.currency,
@@ -51,11 +78,6 @@ class BackupService implements BackupRepository {
       },
       'syncQueue': SyncQueue.getAll().map((op) => op.toMap()).toList(),
     };
-
-    final dir = await _backupDirectory();
-    final file = File('${dir.path}/backup_${businessId}_${_fileTimestamp(now)}.json');
-    await file.writeAsString(const JsonEncoder.withIndent('  ').convert(backup));
-    return file.path;
   }
 
   Future<String> exportSalesCsv({required String businessId}) async {

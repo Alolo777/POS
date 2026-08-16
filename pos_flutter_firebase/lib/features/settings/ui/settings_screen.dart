@@ -123,9 +123,59 @@ class SettingsScreen extends StatelessWidget {
               onTap: () => _exportLocalBackup(context),
             ),
           ),
+          const SizedBox(height: 16),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.cloud_upload_outlined),
+              title: const Text('Respaldo en la nube'),
+              subtitle: const Text('Sube la copia del dispositivo a Firebase Storage'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _uploadBackupToCloud(context),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _uploadBackupToCloud(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context, rootNavigator: true);
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return const AlertDialog(
+          title: Text('Subiendo...'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Subiendo la copia a la nube.'),
+            ],
+          ),
+        );
+      },
+    );
+
+    try {
+      final path = await context.read<BackupRepository>().uploadLocalBackupToCloud(
+            businessId: businessId,
+          );
+      if (!context.mounted) return;
+      navigator.pop();
+      messenger.showSnackBar(
+        SnackBar(content: Text('Respaldo subido a la nube\nRuta: $path')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      navigator.pop();
+      messenger.showSnackBar(SnackBar(
+        content: Text('Error al subir a la nube: $e\nRevisa que Firebase Storage esté habilitado en la consola'),
+      ));
+    }
   }
 
   Future<void> _exportLocalBackup(BuildContext context) async {
