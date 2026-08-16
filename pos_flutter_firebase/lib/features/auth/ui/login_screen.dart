@@ -207,6 +207,7 @@ class _ForgotPasswordDialog extends StatefulWidget {
 class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
   late final TextEditingController _emailController;
   bool _sending = false;
+  bool _sent = false;
   String? _error;
 
   @override
@@ -227,6 +228,10 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
       setState(() => _error = 'Ingresa tu correo');
       return;
     }
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
+      setState(() => _error = 'Ingresa un correo valido');
+      return;
+    }
     setState(() {
       _sending = true;
       _error = null;
@@ -243,59 +248,76 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
       return;
     }
 
-    Navigator.of(context).pop(true);
+    setState(() {
+      _sending = false;
+      _sent = true;
+      _error = null;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Recuperar contrasena'),
+      title: Text(_sent ? 'Correo enviado' : 'Recuperar contrasena'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Ingresa tu correo y te enviaremos un enlace para restablecer tu contrasena.',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            key: const Key('forgotEmailField'),
-            controller: _emailController,
-            keyboardType: TextInputType.emailAddress,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _sending ? null : _send(),
-            enabled: !_sending,
-            decoration: const InputDecoration(
-              labelText: 'Correo',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          if (_error != null) ...[
+          if (_sent) ...[
+            const Icon(Icons.mark_email_read_outlined, size: 48, color: Colors.green),
             const SizedBox(height: 12),
             Text(
-              _error!,
-              style: const TextStyle(color: Colors.red),
+              'Te enviamos un enlace de recuperacion a:\n${_emailController.text.trim()}\n\nRevisa tambien tu carpeta de spam.',
               textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
+          ] else ...[
+            Text(
+              'Ingresa tu correo y te enviaremos un enlace para restablecer tu contrasena.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              key: const Key('forgotEmailField'),
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _sending ? null : _send(),
+              enabled: !_sending,
+              decoration: const InputDecoration(
+                labelText: 'Correo',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _error!,
+                style: const TextStyle(color: Colors.red),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ],
         ],
       ),
       actions: [
-        TextButton(
-          onPressed: _sending ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
-        ),
+        if (!_sent)
+          TextButton(
+            onPressed: _sending ? null : () => Navigator.of(context).pop(),
+            child: const Text('Cancelar'),
+          ),
         FilledButton(
           key: const Key('forgotSubmitButton'),
-          onPressed: _sending ? null : _send,
+          onPressed: _sent
+              ? () => Navigator.of(context).pop(true)
+              : (_sending ? null : _send),
           child: _sending
               ? const SizedBox(
                   height: 18,
                   width: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('Enviar'),
+              : Text(_sent ? 'Listo' : 'Enviar'),
         ),
       ],
     );

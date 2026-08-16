@@ -150,7 +150,10 @@ void main() {
       await tester.pumpAndSettle();
 
       verify(() => mockAuthService.sendPasswordReset('user@test.com')).called(1);
-      expect(find.text('Recuperar contrasena'), findsNothing);
+      expect(find.text('Correo enviado'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('forgotSubmitButton')));
+      await tester.pumpAndSettle();
       expect(find.text('Te enviamos un correo para restablecer tu contrasena'), findsOneWidget);
 
       await tester.pump(const Duration(seconds: 5));
