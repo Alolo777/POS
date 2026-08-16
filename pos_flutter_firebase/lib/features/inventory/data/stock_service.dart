@@ -127,11 +127,46 @@ class StockService implements StockRepository {
           chickenCount: chickenDelta == null
               ? stock.chickenCount
               : (stock.chickenCount ?? 0) + chickenDelta,
+          price: stock.price,
         ));
       } else {
         updatedList.add(stock);
       }
     }
+    await LocalDatabase.cacheProductStock(businessId, updatedList);
+  }
+
+  @override
+  Future<void> setStorePrice({
+    required String businessId,
+    required String storeId,
+    required String productId,
+    required double? price,
+  }) async {
+    await _db
+        .collection('businesses')
+        .doc(businessId)
+        .collection('products')
+        .doc(productId)
+        .collection('stockByStore')
+        .doc(storeId)
+        .set({'price': price}, SetOptions(merge: true));
+
+    final data = LocalDatabase.getCachedProductStock(businessId);
+    if (data == null) return;
+    final updatedList = data.map((stock) {
+      if (stock.productId == productId && stock.storeId == storeId) {
+        return ProductStock(
+          productId: stock.productId,
+          storeId: stock.storeId,
+          stockQuantity: stock.stockQuantity,
+          lowStockAlertQuantity: stock.lowStockAlertQuantity,
+          chickenCount: stock.chickenCount,
+          price: price,
+        );
+      }
+      return stock;
+    }).toList();
     await LocalDatabase.cacheProductStock(businessId, updatedList);
   }
 }

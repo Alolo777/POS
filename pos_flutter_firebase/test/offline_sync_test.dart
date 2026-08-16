@@ -650,5 +650,28 @@ void main() {
           .collection('products').doc('sec1').collection('stockByStore').doc(storeId).get();
       expect(stock.data()!['stockQuantity'], 2.0);
     });
+
+    test('setStorePrice handler writes store price to stockByStore', () async {
+      final firestore = FakeFirebaseFirestore();
+      overrideSyncFirestore(firestore);
+
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').set({'name': 'X', 'active': true});
+      await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').collection('stockByStore').doc(storeId)
+          .set({'stockQuantity': 0.0});
+
+      final handlers = createSyncHandlers();
+      await handlers['setStorePrice']!({
+        'businessId': businessId,
+        'storeId': storeId,
+        'productId': 'p1',
+        'price': 99.5,
+      });
+
+      final stock = await firestore.collection('businesses').doc(businessId)
+          .collection('products').doc('p1').collection('stockByStore').doc(storeId).get();
+      expect(stock.data()!['price'], 99.5);
+    });
   });
 }

@@ -29,6 +29,7 @@ abstract class ProductRepository {
     required String presentationType,
     required String presentationShape,
     required int presentationColor,
+    double? storePrice,
     XFile? imageFile,
   });
 
@@ -49,6 +50,7 @@ abstract class ProductRepository {
     required String presentationType,
     required String presentationShape,
     required int presentationColor,
+    double? storePrice,
     XFile? imageFile,
   });
 

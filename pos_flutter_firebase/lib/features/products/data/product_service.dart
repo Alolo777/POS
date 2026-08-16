@@ -82,6 +82,7 @@ class ProductService implements ProductRepository {
     required String presentationType,
     required String presentationShape,
     required int presentationColor,
+    double? storePrice,
     XFile? imageFile,
   }) async {
     final trimmedName = name.trim();
@@ -184,6 +185,7 @@ class ProductService implements ProductRepository {
           'stockQuantity': trackStock ? stockQuantity : 0,
           'lowStockAlert': trackStock ? lowStockAlertQuantity.round() : 0,
           'lowStockAlertQuantity': trackStock ? lowStockAlertQuantity : 0,
+          if (storePrice != null) 'price': storePrice,
           'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
         });
@@ -205,6 +207,7 @@ class ProductService implements ProductRepository {
         'presentationType': presentationType,
         'presentationShape': presentationShape,
         'presentationColor': presentationColor,
+        if (storePrice != null) 'storePrice': storePrice,
         'localImagePath': localImagePath,
       });
     }
@@ -227,6 +230,7 @@ class ProductService implements ProductRepository {
     required String presentationType,
     required String presentationShape,
     required int presentationColor,
+    double? storePrice,
     XFile? imageFile,
   }) async {
     final trimmedName = name.trim();
@@ -322,6 +326,7 @@ class ProductService implements ProductRepository {
           'stockQuantity': trackStock ? stockQuantity : 0,
           'lowStockAlert': trackStock ? lowStockAlertQuantity.round() : 0,
           'lowStockAlertQuantity': trackStock ? lowStockAlertQuantity : 0,
+          if (storePrice != null) 'price': storePrice,
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
       });
@@ -344,6 +349,7 @@ class ProductService implements ProductRepository {
         'presentationType': presentationType,
         'presentationShape': presentationShape,
         'presentationColor': presentationColor,
+        if (storePrice != null) 'storePrice': storePrice,
         'localImagePath': localImagePath,
       });
     }

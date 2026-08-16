@@ -152,6 +152,22 @@ void main() {
       expect(find.text('\$18.00'), findsOneWidget);
     });
 
+    testWidgets('uses per-store price from stock over product price', (tester) async {
+      await tester.pumpWidget(buildApp(
+        productRepo: mockProductRepo,
+        stockRepo: mockStockRepo,
+      ));
+
+      await emitData(tester, productController, stockController, products: [
+        makeProduct(id: 'p1', name: 'Leche', price: 25.0),
+      ], stocks: {
+        'p1': const ProductStock(productId: 'p1', storeId: 'store_1', stockQuantity: 0, lowStockAlertQuantity: 0, price: 31.5),
+      });
+
+      expect(find.text('\$31.50'), findsOneWidget);
+      expect(find.text('\$25.00'), findsNothing);
+    });
+
     testWidgets('displays stock quantity for tracked products', (tester) async {
       await tester.pumpWidget(buildApp(
         productRepo: mockProductRepo,

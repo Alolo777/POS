@@ -17,6 +17,7 @@ Map<String, SyncHandler> createSyncHandlers() {
     'addProduct': _handleAddProduct,
     'updateProduct': _handleUpdateProduct,
     'deactivateProduct': _handleDeactivateProduct,
+    'setStorePrice': _handleSetStorePrice,
     'createSale': _handleCreateSale,
     'cancelSale': _handleCancelSale,
     'openShift': _handleOpenShift,
@@ -112,6 +113,7 @@ Future<void> _handleAddProduct(Map<String, dynamic> data) async {
       'stockQuantity': stockQuantity,
       'lowStockAlert': lowStockAlertQuantity.round(),
       'lowStockAlertQuantity': lowStockAlertQuantity,
+      if (data['storePrice'] != null) 'price': data['storePrice'],
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -164,6 +166,7 @@ Future<void> _handleUpdateProduct(Map<String, dynamic> data) async {
       'stockQuantity': stockQuantity,
       'lowStockAlert': lowStockAlertQuantity.round(),
       'lowStockAlertQuantity': lowStockAlertQuantity,
+      if (data['storePrice'] != null) 'price': data['storePrice'],
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
@@ -887,6 +890,18 @@ Future<void> _handleUpdateStore(Map<String, dynamic> data) async {
     'phone': _str(data, 'phone'),
     'active': _bool(data, 'active'),
   });
+}
+
+Future<void> _handleSetStorePrice(Map<String, dynamic> data) async {
+  final businessId = _str(data, 'businessId');
+  final storeId = _str(data, 'storeId');
+  final productId = _str(data, 'productId');
+  final price = data['price'];
+  await _firestore
+      .collection('businesses').doc(businessId)
+      .collection('products').doc(productId)
+      .collection('stockByStore').doc(storeId)
+      .set({'price': price}, SetOptions(merge: true));
 }
 
 /// Resuelve o crea el producto "Pollo Entero" (misma lógica que

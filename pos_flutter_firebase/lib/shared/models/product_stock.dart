@@ -7,6 +7,7 @@ class ProductStock {
     required this.stockQuantity,
     required this.lowStockAlertQuantity,
     this.chickenCount,
+    this.price,
   });
 
   final String productId;
@@ -14,6 +15,10 @@ class ProductStock {
   final double stockQuantity;
   final double lowStockAlertQuantity;
   final int? chickenCount;
+
+  /// Precio específico de esta sucursal. Si es null se usa el precio global
+  /// del producto.
+  final double? price;
 
   factory ProductStock.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? {};
@@ -24,6 +29,7 @@ class ProductStock {
       stockQuantity: (data['stockQuantity'] as num? ?? data['stock'] as num? ?? 0).toDouble(),
       lowStockAlertQuantity: (data['lowStockAlertQuantity'] as num? ?? data['lowStockAlert'] as num? ?? 0).toDouble(),
       chickenCount: data['chickenCount'] as int?,
+      price: (data['price'] as num?)?.toDouble(),
     );
   }
 }

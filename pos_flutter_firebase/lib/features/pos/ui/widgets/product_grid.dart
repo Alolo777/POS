@@ -80,7 +80,7 @@ class _ProductGridState extends State<ProductGrid> {
                 categoryId: product.categoryId,
                 categoryName: product.categoryName,
                 sellBy: product.sellBy,
-                price: product.price,
+                price: stock?.price ?? product.price,
                 cost: product.cost,
                 ref: product.ref,
                 trackStock: product.trackStock,

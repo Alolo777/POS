@@ -6,6 +6,9 @@ import 'package:provider/provider.dart';
 
 import '../../../shared/models/category.dart' as app_models;
 import '../../../shared/models/product.dart';
+import '../../../shared/models/store.dart';
+import '../../../shared/providers/app_session_notifier.dart';
+import '../../../features/inventory/domain/stock_repository.dart';
 import '../../../features/pos/domain/category_repository.dart';
 import '../../../features/products/domain/product_repository.dart';
 
@@ -27,6 +30,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
 
   final _nameController = TextEditingController();
   final _priceController = TextEditingController();
+  final _storePriceController = TextEditingController();
   final _costController = TextEditingController();
   final _refController = TextEditingController();
   final _stockController = TextEditingController();
@@ -94,6 +98,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
   void dispose() {
     _nameController.dispose();
     _priceController.dispose();
+    _storePriceController.dispose();
     _costController.dispose();
     _refController.dispose();
     _stockController.dispose();
@@ -104,6 +109,8 @@ class _AddProductScreenState extends State<AddProductScreen> {
   Future<void> _save() async {
     final name = _nameController.text.trim();
     final price = double.tryParse(_priceController.text.trim().replaceAll(',', '.'));
+    final storePriceText = _storePriceController.text.trim().replaceAll(',', '.');
+    final storePrice = storePriceText.isEmpty ? null : double.tryParse(storePriceText);
     final cost = double.tryParse(_costController.text.trim().replaceAll(',', '.')) ?? 0;
     final ref = _refController.text.trim();
     final stockQuantity = double.tryParse(_stockController.text.trim().replaceAll(',', '.')) ?? 0;
@@ -115,6 +122,14 @@ class _AddProductScreenState extends State<AddProductScreen> {
     }
     if (price == null || price < 0) {
       setState(() => _errorMessage = 'El precio es obligatorio');
+      return;
+    }
+    if (storePrice != null && storePrice < 0) {
+      setState(() => _errorMessage = 'El precio por sucursal no puede ser negativo');
+      return;
+    }
+    if (storePrice == null && storePriceText.isNotEmpty) {
+      setState(() => _errorMessage = 'El precio por sucursal no es valido');
       return;
     }
     if (cost < 0) {
@@ -162,6 +177,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
           presentationType: _presentationType,
           presentationShape: _presentationShape,
           presentationColor: _presentationColor,
+          storePrice: storePrice,
           imageFile: _presentationType == 'image' ? _imageFile : null,
         );
       } else {
@@ -182,6 +198,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
           presentationType: _presentationType,
           presentationShape: _presentationShape,
           presentationColor: _presentationColor,
+          storePrice: storePrice,
           imageFile: _presentationType == 'image' ? _imageFile : null,
         );
       }
@@ -194,6 +211,87 @@ class _AddProductScreenState extends State<AddProductScreen> {
     } finally {
       if (mounted) {
         setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  Future<void> _showStorePricesDialog() async {
+    final product = widget.product;
+    if (product == null) return;
+    final session = context.read<AppSessionNotifier>();
+    final stores = session.session?.stores ?? const <Store>[];
+    if (stores.isEmpty) return;
+
+    final controllers = <String, TextEditingController>{
+      for (final store in stores) store.id: TextEditingController(),
+    };
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Precios por sucursal · ${product.name}'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Precio general: \$${_formatNumber(product.price)}.\nDeja el campo vacio para usar el precio general en esa sucursal.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              for (final store in stores) ...[
+                TextField(
+                  controller: controllers[store.id],
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: store.name,
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+
+    try {
+      if (result != true || !mounted) return;
+      final stockRepo = context.read<StockRepository>();
+      for (final store in stores) {
+        final text = controllers[store.id]!.text.trim().replaceAll(',', '.');
+        if (text.isEmpty) continue;
+        final price = double.tryParse(text);
+        if (price == null || price < 0) continue;
+        await stockRepo.setStorePrice(
+          businessId: widget.businessId,
+          storeId: store.id,
+          productId: product.id,
+          price: price,
+        );
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Precios por sucursal guardados')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      for (final controller in controllers.values) {
+        controller.dispose();
       }
     }
   }
@@ -316,8 +414,33 @@ class _AddProductScreenState extends State<AddProductScreen> {
               TextField(
                 controller: _priceController,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Precio *', border: OutlineInputBorder()),
+                decoration: const InputDecoration(
+                  labelText: 'Precio *',
+                  helperText: 'Precio general del producto',
+                  border: OutlineInputBorder(),
+                ),
               ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _storePriceController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Precio por sucursal (opcional)',
+                  helperText: 'Dejalo vacio para usar el precio general en esta sucursal',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              if (_isEditMode) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _showStorePricesDialog,
+                    icon: const Icon(Icons.store),
+                    label: const Text('Precios por sucursal'),
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               TextField(
                 controller: _costController,

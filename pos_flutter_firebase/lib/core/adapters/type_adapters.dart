@@ -337,12 +337,14 @@ class ProductStockAdapter extends TypeAdapter<ProductStock> {
       storeId: fields[1] as String,
       stockQuantity: fields[2] as double,
       lowStockAlertQuantity: fields[3] as double,
+      chickenCount: fields[4] as int?,
+      price: (fields[5] as num?)?.toDouble(),
     );
   }
 
   @override
   void write(BinaryWriter writer, ProductStock obj) {
-    writer.writeByte(4);
+    writer.writeByte(6);
     writer.writeByte(0);
     writer.write(obj.productId);
     writer.writeByte(1);
@@ -351,6 +353,10 @@ class ProductStockAdapter extends TypeAdapter<ProductStock> {
     writer.write(obj.stockQuantity);
     writer.writeByte(3);
     writer.write(obj.lowStockAlertQuantity);
+    writer.writeByte(4);
+    writer.write(obj.chickenCount);
+    writer.writeByte(5);
+    writer.write(obj.price);
   }
 }
 
