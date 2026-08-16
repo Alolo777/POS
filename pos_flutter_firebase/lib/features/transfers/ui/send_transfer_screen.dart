@@ -35,10 +35,15 @@ class _SendTransferScreenState extends State<SendTransferScreen> {
   final _items = <_TransferItemEntry>[];
   bool _loading = true;
   bool _saving = false;
+  late Stream<Map<String, ProductStock>> _stockStream;
 
   @override
   void initState() {
     super.initState();
+    // Stock de la SUCURSAL DE ORIGEN (per-ruta), no el de otras sucursales.
+    _stockStream = context
+        .read<StockRepository>()
+        .watchStockByStore(businessId: widget.businessId, storeId: widget.fromStore.id);
     _loadData();
   }
 
@@ -145,21 +150,23 @@ class _SendTransferScreenState extends State<SendTransferScreen> {
     final stores = session?.stores.where((s) => s.id != widget.fromStore.id).toList() ?? [];
 
     final productsProvider = context.watch<ProductRepository>();
-    final stockProvider = context.watch<StockRepository>();
-    final allStock = stockProvider.getCachedStock(widget.businessId) ?? {};
     final allProducts = productsProvider.getCachedProducts(widget.businessId) ?? [];
-
-    final storeProducts = allProducts
-        .where((p) => p.trackStock)
-        .map((p) => MapEntry(p, allStock[p.id]))
-        .where((e) => e.value != null)
-        .toList();
 
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    return Scaffold(
+    return StreamBuilder<Map<String, ProductStock>>(
+      stream: _stockStream,
+      builder: (context, snapshot) {
+        final stockById = snapshot.data ?? const <String, ProductStock>{};
+        final storeProducts = allProducts
+            .where((p) => p.trackStock)
+            .map((p) => MapEntry(p, stockById[p.id]))
+            .where((e) => e.value != null)
+            .toList();
+
+        return Scaffold(
       appBar: AppBar(title: const Text('Enviar mercancía')),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -253,6 +260,8 @@ class _SendTransferScreenState extends State<SendTransferScreen> {
           ],
         ],
       ),
+      );
+      },
     );
   }
 }
