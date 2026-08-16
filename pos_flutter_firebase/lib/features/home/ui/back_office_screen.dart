@@ -122,6 +122,7 @@ class _ReportsTab extends StatefulWidget {
 class _ReportsTabState extends State<_ReportsTab> {
   late DateTime _startDate;
   late DateTime _endDate;
+  String? _selectedRange;
 
   String _storeName(String? id) =>
       widget.stores.firstWhere((s) => s.id == id, orElse: () => const Store(id: '', name: '', address: '', phone: '', active: false)).name;
@@ -211,16 +212,46 @@ class _ReportsTabState extends State<_ReportsTab> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                ActionChip(label: const Text('Hoy'), onPressed: () => _applyQuickRange('today')),
-                ActionChip(label: const Text('Ayer'), onPressed: () => _applyQuickRange('yesterday')),
-                ActionChip(label: const Text('Esta semana'), onPressed: () => _applyQuickRange('thisWeek')),
-                ActionChip(label: const Text('Semana pasada'), onPressed: () => _applyQuickRange('lastWeek')),
-                ActionChip(label: const Text('Este mes'), onPressed: () => _applyQuickRange('thisMonth')),
-                ActionChip(label: const Text('Todo'), onPressed: () => _applyQuickRange('all')),
+                ActionChip(
+                  label: const Text('Hoy'),
+                  backgroundColor: _selectedRange == 'today' ? Colors.orange : null,
+                  onPressed: () => _applyQuickRange('today'),
+                ),
+                ActionChip(
+                  label: const Text('Ayer'),
+                  backgroundColor: _selectedRange == 'yesterday' ? Colors.orange : null,
+                  onPressed: () => _applyQuickRange('yesterday'),
+                ),
+                ActionChip(
+                  label: const Text('Esta semana'),
+                  backgroundColor: _selectedRange == 'thisWeek' ? Colors.orange : null,
+                  onPressed: () => _applyQuickRange('thisWeek'),
+                ),
+                ActionChip(
+                  label: const Text('Semana pasada'),
+                  backgroundColor: _selectedRange == 'lastWeek' ? Colors.orange : null,
+                  onPressed: () => _applyQuickRange('lastWeek'),
+                ),
+                ActionChip(
+                  label: const Text('Este mes'),
+                  backgroundColor: _selectedRange == 'thisMonth' ? Colors.orange : null,
+                  onPressed: () => _applyQuickRange('thisMonth'),
+                ),
+                ActionChip(
+                  label: const Text('Todo'),
+                  backgroundColor: _selectedRange == 'all' ? Colors.orange : null,
+                  onPressed: () => _applyQuickRange('all'),
+                ),
                 FilledButton.tonalIcon(
                   onPressed: _pickCustomRange,
                   icon: const Icon(Icons.date_range),
                   label: const Text('Personalizado'),
+                  style: _selectedRange == 'custom'
+                      ? FilledButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                          foregroundColor: Colors.white,
+                        )
+                      : null,
                 ),
               ],
             ),
@@ -505,6 +536,7 @@ class _ReportsTabState extends State<_ReportsTab> {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     setState(() {
+      _selectedRange = value;
       switch (value) {
         case 'yesterday':
           _startDate = today.subtract(const Duration(days: 1));
@@ -543,6 +575,7 @@ class _ReportsTabState extends State<_ReportsTab> {
     );
     if (range == null) return;
     setState(() {
+      _selectedRange = 'custom';
       _startDate = DateTime(range.start.year, range.start.month, range.start.day);
       _endDate = DateTime(range.end.year, range.end.month, range.end.day, 23, 59, 59);
     });

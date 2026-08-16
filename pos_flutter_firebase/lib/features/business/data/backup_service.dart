@@ -2,11 +2,22 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../core/offline/local_database.dart';
 import '../../../core/offline/sync_queue.dart';
+import '../../../shared/models/business.dart';
+import '../../../shared/models/category.dart';
+import '../../../shared/models/discount.dart';
+import '../../../shared/models/employee.dart';
+import '../../../shared/models/inventory_movement.dart';
+import '../../../shared/models/modifier.dart';
+import '../../../shared/models/open_ticket.dart';
+import '../../../shared/models/product.dart';
+import '../../../shared/models/product_stock.dart';
+import '../../../shared/models/sale.dart';
+import '../../../shared/models/shift.dart';
+import '../../../shared/models/store.dart';
 import '../domain/backup_repository.dart';
 
 class BackupService implements BackupRepository {
@@ -24,22 +35,215 @@ class BackupService implements BackupRepository {
     return file.path;
   }
 
-  Future<String> uploadLocalBackupToCloud({required String businessId}) async {
-    final backup = await _buildBackupMap(businessId: businessId);
-    final now = DateTime.now();
-    final path = 'backups/$businessId/backup_${_fileTimestamp(now)}.json';
+  Future<String> importLocalBackup({required String businessId, required String filePath}) async {
+    final file = File(filePath);
+    if (!await file.exists()) {
+      throw StateError('El archivo de respaldo no existe');
+    }
+    final decoded = jsonDecode(await file.readAsString());
+    final backup = Map<String, dynamic>.from(decoded as Map);
 
-    final ref = FirebaseStorage.instance.ref(path);
-    final metadata = SettableMetadata(
-      contentType: 'application/json',
-      customMetadata: {'businessId': businessId, 'exportedAt': now.toIso8601String()},
-    );
-    await ref.putData(
-      utf8.encode(const JsonEncoder().convert(backup)),
-      metadata,
-    );
-    return path;
+    if (backup['businessId'] != businessId) {
+      throw StateError('El respaldo no corresponde a esta empresa');
+    }
+    final cache = Map<String, dynamic>.from(backup['localCache'] as Map? ?? {});
+
+    await LocalDatabase.cacheBusiness(businessId, _businessFromMap(businessId, Map<String, dynamic>.from(cache['business'] as Map? ?? const {})));
+    await LocalDatabase.cacheStores(businessId, _storesFromMap(cache['stores'] as List? ?? const []));
+    await LocalDatabase.cacheEmployees(businessId, _employeesFromMap(businessId, cache['employees'] as List? ?? const []));
+    await LocalDatabase.cacheProducts(businessId, _productsFromMap(cache['products'] as List? ?? const []));
+    await LocalDatabase.cacheProductStock(businessId, _stockFromMap(cache['productStock'] as List? ?? const []));
+    await LocalDatabase.cacheCategories(businessId, _categoriesFromMap(cache['categories'] as List? ?? const []));
+    await LocalDatabase.cacheModifiers(businessId, _modifiersFromMap(cache['modifiers'] as List? ?? const []));
+    await LocalDatabase.cacheDiscounts(businessId, _discountsFromMap(cache['discounts'] as List? ?? const []));
+    await LocalDatabase.cacheSales(businessId, _salesFromMap(businessId, cache['sales'] as List? ?? const []));
+    await LocalDatabase.cacheShifts(businessId, _shiftsFromMap(businessId, cache['shifts'] as List? ?? const []));
+    await LocalDatabase.cacheOpenTickets(businessId, _ticketsFromMap(businessId, cache['openTickets'] as List? ?? const []));
+    await LocalDatabase.cacheInventoryMovements(businessId, _movementsFromMap(cache['inventoryMovements'] as List? ?? const []));
+
+    return filePath;
   }
+
+  DateTime? _dt(dynamic value) {
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value);
+    return null;
+  }
+
+  List<Map<String, dynamic>> _maps(List<dynamic> list) => list
+      .where((e) => e is Map)
+      .map((e) => Map<String, dynamic>.from(e as Map))
+      .toList();
+
+  List<String> _strings(dynamic list) =>
+      List<String>.from((list as List? ?? const []).whereType<String>());
+
+  Business _businessFromMap(String businessId, Map<String, dynamic> m) => Business(
+        id: m['id'] as String? ?? businessId,
+        name: m['name'] as String? ?? 'Mi negocio',
+        currency: m['currency'] as String? ?? 'MXN',
+        timezone: m['timezone'] as String? ?? 'America/Mexico_City',
+        active: m['active'] as bool? ?? true,
+      );
+
+  List<Store> _storesFromMap(List<dynamic> list) => _maps(list)
+      .map((m) => Store(
+            id: m['id'] as String? ?? '',
+            name: m['name'] as String? ?? '',
+            address: m['address'] as String? ?? '',
+            phone: m['phone'] as String? ?? '',
+            active: m['active'] as bool? ?? true,
+          ))
+      .toList();
+
+  List<Employee> _employeesFromMap(String businessId, List<dynamic> list) => _maps(list)
+      .map((m) => Employee(
+            id: m['id'] as String? ?? '',
+            businessId: m['businessId'] as String? ?? businessId,
+            authUid: m['authUid'] as String? ?? '',
+            name: m['name'] as String? ?? '',
+            email: m['email'] as String? ?? '',
+            role: m['role'] as String? ?? 'cashier',
+            storeIds: _strings(m['storeIds']),
+            permissions: _strings(m['permissions']),
+            pin: m['pin'] as String? ?? '',
+            active: m['active'] as bool? ?? true,
+          ))
+      .toList();
+
+  List<Product> _productsFromMap(List<dynamic> list) => _maps(list)
+      .map((m) => Product(
+            id: m['id'] as String? ?? '',
+            name: m['name'] as String? ?? '',
+            categoryId: m['categoryId'] as String?,
+            categoryName: m['categoryName'] as String?,
+            sellBy: m['sellBy'] as String? ?? 'unit',
+            price: ((m['price'] as num?) ?? 0).toDouble(),
+            cost: ((m['cost'] as num?) ?? 0).toDouble(),
+            ref: m['ref'] as String? ?? '',
+            trackStock: m['trackStock'] as bool? ?? false,
+            stockQuantity: ((m['stockQuantity'] as num?) ?? 0).toDouble(),
+            lowStockAlertQuantity: ((m['lowStockAlertQuantity'] as num?) ?? 0).toDouble(),
+            presentationType: m['presentationType'] as String? ?? 'shape',
+            presentationShape: m['presentationShape'] as String? ?? 'square',
+            presentationColor: ((m['presentationColor'] as num?) ?? 0xFF9E9E9E).toInt(),
+            imageUrl: m['imageUrl'] as String?,
+            localImagePath: m['localImagePath'] as String?,
+            active: m['active'] as bool? ?? true,
+            stockLoaded: true,
+          ))
+      .toList();
+
+  List<ProductStock> _stockFromMap(List<dynamic> list) => _maps(list)
+      .map((m) => ProductStock(
+            productId: m['productId'] as String? ?? '',
+            storeId: m['storeId'] as String? ?? '',
+            stockQuantity: ((m['stockQuantity'] as num?) ?? 0).toDouble(),
+            lowStockAlertQuantity: ((m['lowStockAlertQuantity'] as num?) ?? 0).toDouble(),
+            chickenCount: m['chickenCount'] as int?,
+            price: (m['price'] as num?)?.toDouble(),
+          ))
+      .toList();
+
+  List<Category> _categoriesFromMap(List<dynamic> list) => _maps(list)
+      .map((m) => Category(
+            id: m['id'] as String? ?? '',
+            name: m['name'] as String? ?? '',
+            color: ((m['color'] as num?) ?? 0xFF607D8B).toInt(),
+            active: m['active'] as bool? ?? true,
+          ))
+      .toList();
+
+  List<Modifier> _modifiersFromMap(List<dynamic> list) => _maps(list)
+      .map((m) => Modifier(
+            id: m['id'] as String? ?? '',
+            name: m['name'] as String? ?? '',
+            price: ((m['price'] as num?) ?? 0).toDouble(),
+            active: m['active'] as bool? ?? true,
+          ))
+      .toList();
+
+  List<Discount> _discountsFromMap(List<dynamic> list) => _maps(list)
+      .map((m) => Discount(
+            id: m['id'] as String? ?? '',
+            name: m['name'] as String? ?? '',
+            type: m['type'] as String? ?? 'fixed',
+            value: ((m['value'] as num?) ?? 0).toDouble(),
+            active: m['active'] as bool? ?? true,
+          ))
+      .toList();
+
+  List<Sale> _salesFromMap(String businessId, List<dynamic> list) => _maps(list)
+      .map((m) => Sale(
+            id: m['id'] as String? ?? '',
+            businessId: m['businessId'] as String? ?? businessId,
+            folio: m['folio'] as String? ?? '',
+            storeId: m['storeId'] as String? ?? '',
+            employeeId: m['employeeId'] as String? ?? '',
+            shiftId: m['shiftId'] as String?,
+            items: _maps(m['items'] as List? ?? const []),
+            subtotal: ((m['subtotal'] as num?) ?? 0).toDouble(),
+            discountTotal: ((m['discountTotal'] as num?) ?? 0).toDouble(),
+            taxTotal: ((m['taxTotal'] as num?) ?? 0).toDouble(),
+            total: ((m['total'] as num?) ?? 0).toDouble(),
+            paymentMethod: m['paymentMethod'] as String? ?? 'cash',
+            cashReceived: (m['cashReceived'] as num?)?.toDouble(),
+            changeDue: (m['changeDue'] as num?)?.toDouble(),
+            status: m['status'] as String? ?? 'completed',
+            originalSaleId: m['originalSaleId'] as String?,
+            returnedItems: _maps(m['returnedItems'] as List? ?? const []),
+            createdAt: _dt(m['createdAt']),
+            cancelledAt: _dt(m['cancelledAt']),
+            cancelReason: m['cancelReason'] as String?,
+            inventoryReturned: m['inventoryReturned'] as bool? ?? false,
+            clientCreatedAt: _dt(m['clientCreatedAt']),
+            type: m['type'] as String? ?? 'sale',
+            refund: m['refund'] as bool? ?? false,
+            refundIds: _strings(m['refundIds']),
+          ))
+      .toList();
+
+  List<Shift> _shiftsFromMap(String businessId, List<dynamic> list) => _maps(list)
+      .map((m) => Shift(
+            id: m['id'] as String? ?? '',
+            businessId: m['businessId'] as String? ?? businessId,
+            storeId: m['storeId'] as String? ?? '',
+            employeeId: m['employeeId'] as String? ?? '',
+            status: m['status'] as String? ?? 'open',
+            openingCash: ((m['openingCash'] as num?) ?? 0).toDouble(),
+            closingCash: (m['closingCash'] as num?)?.toDouble(),
+            cashSales: ((m['cashSales'] as num?) ?? 0).toDouble(),
+            cardSales: ((m['cardSales'] as num?) ?? 0).toDouble(),
+            totalSales: ((m['totalSales'] as num?) ?? 0).toDouble(),
+            cashRefunds: ((m['cashRefunds'] as num?) ?? 0).toDouble(),
+            depositsTotal: ((m['depositsTotal'] as num?) ?? 0).toDouble(),
+            payoutsTotal: ((m['payoutsTotal'] as num?) ?? 0).toDouble(),
+            cashMovements: _maps(m['cashMovements'] as List? ?? const []),
+            expectedCash: ((m['expectedCash'] as num?) ?? 0).toDouble(),
+            cashDifference: ((m['cashDifference'] as num?) ?? 0).toDouble(),
+            openedAt: _dt(m['openedAt']),
+            closedAt: _dt(m['closedAt']),
+          ))
+      .toList();
+
+  List<OpenTicket> _ticketsFromMap(String businessId, List<dynamic> list) => _maps(list)
+      .map((m) => OpenTicket(
+            id: m['id'] as String? ?? '',
+            businessId: m['businessId'] as String? ?? businessId,
+            storeId: m['storeId'] as String? ?? '',
+            employeeId: m['employeeId'] as String? ?? '',
+            name: m['name'] as String? ?? 'Ticket abierto',
+            items: _maps(m['items'] as List? ?? const []),
+            total: ((m['total'] as num?) ?? 0).toDouble(),
+            status: m['status'] as String? ?? 'open',
+            createdAt: _dt(m['createdAt']),
+            updatedAt: _dt(m['updatedAt']),
+          ))
+      .toList();
+
+  List<InventoryMovement> _movementsFromMap(List<dynamic> list) => _maps(list)
+      .map((m) => InventoryMovement.fromMap(m, m['id'] as String? ?? ''))
+      .toList();
 
   Future<Map<String, dynamic>> _buildBackupMap({required String businessId}) async {
     final business = LocalDatabase.getCachedBusiness(businessId);

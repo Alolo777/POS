@@ -3,8 +3,9 @@ abstract class BackupRepository {
     required String businessId,
   });
 
-  Future<String> uploadLocalBackupToCloud({
+  Future<String> importLocalBackup({
     required String businessId,
+    required String filePath,
   });
 
   Future<String> exportSalesCsv({

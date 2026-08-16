@@ -132,7 +132,7 @@ class MyApp extends StatelessWidget {
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(fontSizeNotifier.textScaleFactor)),
           child: MaterialApp.router(
-            title: 'POS Flutter Firebase',
+            title: 'PV Donald',
             theme: GlassTheme.light(),
             darkTheme: GlassTheme.dark(),
             themeMode: themeNotifier.mode,

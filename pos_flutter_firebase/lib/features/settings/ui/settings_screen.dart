@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../../../shared/models/business.dart';
@@ -126,11 +129,11 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 16),
           Card(
             child: ListTile(
-              leading: const Icon(Icons.cloud_upload_outlined),
-              title: const Text('Respaldo en la nube'),
-              subtitle: const Text('Sube la copia del dispositivo a Firebase Storage'),
+              leading: const Icon(Icons.upload_file_outlined),
+              title: const Text('Importar respaldo'),
+              subtitle: const Text('Restaura en este dispositivo un respaldo local'),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => _uploadBackupToCloud(context),
+              onTap: () => _importLocalBackup(context),
             ),
           ),
         ],
@@ -138,43 +141,64 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _uploadBackupToCloud(BuildContext context) async {
+  Future<void> _importLocalBackup(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
-    final navigator = Navigator.of(context, rootNavigator: true);
 
-    showDialog<void>(
+    final Directory dir;
+    final downloads = await getDownloadsDirectory();
+    dir = downloads ?? Directory('${(await getApplicationDocumentsDirectory()).path}/pos_backups');
+
+    final files = <File>[];
+    if (await dir.exists()) {
+      files.addAll(dir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.json') && f.path.contains('backup_'))
+          .toList()
+        ..sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync())));
+    }
+
+    if (files.isEmpty) {
+      messenger.showSnackBar(const SnackBar(
+          content: Text('No hay respaldos locales. Usa primero "Respaldo local".')));
+      return;
+    }
+
+    final selected = await showDialog<String>(
       context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return const AlertDialog(
-          title: Text('Subiendo...'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Subiendo la copia a la nube.'),
-            ],
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Importar respaldo'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: files
+                .map((f) => ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.description_outlined),
+                      title: Text(f.uri.pathSegments.last),
+                      subtitle: Text(f.lastModifiedSync().toString().split('.').first),
+                      onTap: () => Navigator.pop(dialogContext, f.path),
+                    ))
+                .toList(),
           ),
-        );
-      },
+        ),
+      ),
     );
+    if (selected == null || !context.mounted) return;
 
     try {
-      final path = await context.read<BackupRepository>().uploadLocalBackupToCloud(
+      await context.read<BackupRepository>().importLocalBackup(
             businessId: businessId,
+            filePath: selected,
           );
       if (!context.mounted) return;
-      navigator.pop();
       messenger.showSnackBar(
-        SnackBar(content: Text('Respaldo subido a la nube\nRuta: $path')),
+        const SnackBar(content: Text('Respaldo importado. Reinicia la app para ver los datos restaurados.')),
       );
     } catch (e) {
       if (!context.mounted) return;
-      navigator.pop();
-      messenger.showSnackBar(SnackBar(
-        content: Text('Error al subir a la nube: $e\nRevisa que Firebase Storage esté habilitado en la consola'),
-      ));
+      messenger.showSnackBar(SnackBar(content: Text('Error al importar: $e')));
     }
   }
 
