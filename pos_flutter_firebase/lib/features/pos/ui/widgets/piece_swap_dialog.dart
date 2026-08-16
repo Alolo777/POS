@@ -10,8 +10,9 @@ import 'package:pos_flutter_firebase/features/inventory/domain/stock_repository.
 
 /// Diálogo para registrar el intercambio de piezas al vender pollo entero.
 ///
-/// El empleado elige las piezas de destazado entregadas al cliente
-/// (restan del stock) y las devueltas por el cliente (suman al stock).
+/// Para cada pieza se define un peso de ENTREGA (resta stock) y un peso de
+/// DEVOLUCIÓN (suma stock), que pueden ser diferentes. Cada uno genera un
+/// intercambio y su movimiento de inventario correspondiente.
 class PieceSwapDialog extends StatefulWidget {
   const PieceSwapDialog({
     super.key,
@@ -31,30 +32,45 @@ class PieceSwapDialog extends StatefulWidget {
 }
 
 class _SwapEntry {
-  _SwapEntry({this.direction = 'out'});
+  _SwapEntry({this.productId, this.outWeight, this.inWeight});
 
+  final String? productId;
   Product? product;
-  String direction;
-  double? weight;
+  double? outWeight;
+  double? inWeight;
+  final TextEditingController outCtrl = TextEditingController();
+  final TextEditingController inCtrl = TextEditingController();
 
-  bool get isComplete => product != null && (weight ?? 0) > 0;
+  void dispose() {
+    outCtrl.dispose();
+    inCtrl.dispose();
+  }
 }
 
 class _PieceSwapDialogState extends State<PieceSwapDialog> {
   late final List<_SwapEntry> _entries;
-  final List<TextEditingController> _weightControllers = [];
 
   @override
   void initState() {
     super.initState();
     _entries = [];
     if (widget.initialSwaps.isNotEmpty) {
+      final byProduct = <String, List<PieceSwap>>{};
       for (final swap in widget.initialSwaps) {
-        final entry = _SwapEntry(direction: swap.direction)
-          ..weight = swap.weight;
+        byProduct.putIfAbsent(swap.productId, () => []).add(swap);
+      }
+      for (final group in byProduct.values) {
+        final entry = _SwapEntry(productId: group.first.productId);
+        for (final swap in group) {
+          if (swap.direction == 'out') {
+            entry.outWeight = swap.weight;
+            entry.outCtrl.text = _fmtWeight(swap.weight);
+          } else {
+            entry.inWeight = swap.weight;
+            entry.inCtrl.text = _fmtWeight(swap.weight);
+          }
+        }
         _entries.add(entry);
-        _weightControllers.add(TextEditingController(text: _fmtWeight(swap.weight)));
-        // El Product se resuelve al cargar el catálogo (ver _resolveInitialProducts).
       }
     } else {
       _addRow();
@@ -67,32 +83,25 @@ class _PieceSwapDialogState extends State<PieceSwapDialog> {
 
   @override
   void dispose() {
-    for (final controller in _weightControllers) {
-      controller.dispose();
+    for (final entry in _entries) {
+      entry.dispose();
     }
     super.dispose();
   }
 
   void _addRow() {
-    setState(() {
-      _entries.add(_SwapEntry());
-      _weightControllers.add(TextEditingController());
-    });
+    setState(() => _entries.add(_SwapEntry()));
   }
 
   void _removeRow(int index) {
-    setState(() {
-      _weightControllers[index].dispose();
-      _weightControllers.removeAt(index);
-      _entries.removeAt(index);
-    });
+    setState(() => _entries.removeAt(index).dispose());
   }
 
   void _resolveInitialProducts(List<Product> products) {
     final byId = {for (final p in products) p.id: p};
-    for (var i = 0; i < widget.initialSwaps.length && i < _entries.length; i++) {
-      final product = byId[widget.initialSwaps[i].productId];
-      if (product != null) _entries[i].product = product;
+    for (final entry in _entries) {
+      if (entry.product != null || entry.productId == null) continue;
+      entry.product = byId[entry.productId];
     }
   }
 
@@ -103,14 +112,28 @@ class _PieceSwapDialogState extends State<PieceSwapDialog> {
   void _confirm(List<Product> products, Map<String, ProductStock> stocks) {
     final swaps = <PieceSwap>[];
     for (final entry in _entries) {
-      if (!entry.isComplete) continue;
-      swaps.add(PieceSwap(
-        productId: entry.product!.id,
-        productName: entry.product!.name,
-        weight: entry.weight!,
-        direction: entry.direction,
-      ));
+      final product = entry.product;
+      if (product == null) continue;
+      final out = entry.outWeight ?? 0;
+      final back = entry.inWeight ?? 0;
+      if (out > 0) {
+        swaps.add(PieceSwap(
+          productId: product.id,
+          productName: product.name,
+          weight: out,
+          direction: 'out',
+        ));
+      }
+      if (back > 0) {
+        swaps.add(PieceSwap(
+          productId: product.id,
+          productName: product.name,
+          weight: back,
+          direction: 'in',
+        ));
+      }
     }
+
     if (swaps.isEmpty) {
       Navigator.pop(context, swaps);
       return;
@@ -120,7 +143,7 @@ class _PieceSwapDialogState extends State<PieceSwapDialog> {
     for (final entry in _entries) {
       if (entry.product == null) continue;
       stockByProduct[entry.product!.id] =
-          (stockByProduct[entry.product!.id] ?? 0) + (entry.direction == 'out' ? (entry.weight ?? 0) : 0);
+          (stockByProduct[entry.product!.id] ?? 0) + (entry.outWeight ?? 0);
     }
     for (final MapEntry(key: id, value: needed) in stockByProduct.entries) {
       final product = products.firstWhere((p) => p.id == id);
@@ -142,7 +165,7 @@ class _PieceSwapDialogState extends State<PieceSwapDialog> {
       title: const Text('Intercambio de piezas'),
       contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
       content: SizedBox(
-        width: 520,
+        width: 620,
         height: MediaQuery.of(context).size.height * 0.72,
         child: StreamBuilder<List<Product>>(
           stream: context.read<ProductRepository>().watchProducts(businessId: widget.businessId),
@@ -181,8 +204,8 @@ class _PieceSwapDialogState extends State<PieceSwapDialog> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Text(
-          'Registra qué piezas entregas al cliente y cuáles él devuelve. '
-          'Entregadas restan stock y devueltas lo suman.',
+          'Por cada pieza define el peso que ENTREGAS al cliente (resta del stock) '
+          'y el peso que el cliente DEVUELVE (suma al stock). Pueden ser diferentes.',
           style: TextStyle(color: Colors.black54, fontSize: 13),
         ),
         const SizedBox(height: 12),
@@ -232,56 +255,62 @@ class _PieceSwapDialogState extends State<PieceSwapDialog> {
         ? ''
         : 'Stock: ${_fmtWeight(available!)} kg';
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
       children: [
-        Expanded(
-          flex: 3,
-          child: DropdownButtonFormField<Product>(
-            initialValue: entry.product,
-            isExpanded: true,
-            decoration: InputDecoration(
-              labelText: 'Pieza',
-              isDense: true,
-              helperText: stockText,
-              border: const OutlineInputBorder(),
-            ),
-            items: products.map((p) => DropdownMenuItem(value: p, child: Text(p.name, overflow: TextOverflow.ellipsis))).toList(),
-            onChanged: (value) => setState(() => entry.product = value),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: TextField(
-            controller: _weightControllers[index],
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-            ],
-            decoration: const InputDecoration(labelText: 'Peso kg', isDense: true, border: OutlineInputBorder()),
-            onChanged: (value) => entry.weight = double.tryParse(value),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SegmentedButton<String>(
-              style: const ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            Expanded(
+              flex: 2,
+              child: DropdownButtonFormField<Product>(
+                initialValue: entry.product,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: 'Pieza',
+                  isDense: true,
+                  helperText: stockText,
+                  border: const OutlineInputBorder(),
+                ),
+                items: products.map((p) => DropdownMenuItem(value: p, child: Text(p.name, overflow: TextOverflow.ellipsis))).toList(),
+                onChanged: (value) => setState(() => entry.product = value),
               ),
-              segments: const [
-                ButtonSegment(value: 'out', label: Text('Entrega', style: TextStyle(fontSize: 11))),
-                ButtonSegment(value: 'in', label: Text('Devuelve', style: TextStyle(fontSize: 11))),
-              ],
-              selected: {entry.direction},
-              onSelectionChanged: (selection) => setState(() => entry.direction = selection.first),
             ),
             IconButton(
               visualDensity: VisualDensity.compact,
               icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent),
               onPressed: () => _removeRow(index),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: entry.outCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                decoration: const InputDecoration(
+                  labelText: 'Entrega kg',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (value) => entry.outWeight = double.tryParse(value),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: entry.inCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                decoration: const InputDecoration(
+                  labelText: 'Devuelve kg',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (value) => entry.inWeight = double.tryParse(value),
+              ),
             ),
           ],
         ),
