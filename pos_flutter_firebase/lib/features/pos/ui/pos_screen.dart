@@ -390,6 +390,7 @@ class _PosScreenState extends State<PosScreen> {
         currentModifiers: item.modifiers,
         currentDiscount: item.discount,
         itemPrice: item.product.price * item.quantity,
+        quantity: item.quantity,
       ),
     );
     if (result == null || !mounted) return;

@@ -14,12 +14,14 @@ class ModifierSelectionDialog extends StatefulWidget {
     required this.currentModifiers,
     required this.currentDiscount,
     required this.itemPrice,
+    required this.quantity,
   });
 
   final String businessId;
   final List<SelectedModifier> currentModifiers;
   final double currentDiscount;
   final double itemPrice;
+  final double quantity;
 
   @override
   State<ModifierSelectionDialog> createState() => _ModifierSelectionDialogState();
@@ -44,11 +46,18 @@ class _ModifierSelectionDialogState extends State<ModifierSelectionDialog> {
   void _applyDiscount(Discount discount, double itemPrice) {
     final amount = discount.isPercentage
         ? itemPrice * (discount.value / 100)
-        : discount.value > itemPrice ? itemPrice : discount.value;
+        : _fixedDiscountAmount(discount);
     setState(() {
       _selectedDiscount = amount;
       _selectedDiscountName = discount.name;
     });
+  }
+
+  /// Descuento fijo: se aplica por unidad/kg, es decir
+  /// `value × cantidad` en la línea, sin pasarse del total de la línea.
+  double _fixedDiscountAmount(Discount discount) {
+    final total = discount.value * widget.quantity;
+    return total > widget.itemPrice ? widget.itemPrice : total;
   }
 
   @override
@@ -167,7 +176,7 @@ class _ModifierSelectionDialogState extends State<ModifierSelectionDialog> {
               children: discounts.map((d) {
                 final displayAmount = d.isPercentage
                     ? '${d.value.toStringAsFixed(0)}% (-${(widget.itemPrice * d.value / 100).toStringAsFixed(2)})'
-                    : '-\$${d.value.toStringAsFixed(2)}';
+                    : '-\$${d.value.toStringAsFixed(2)} por unidad/kg (-${_fixedDiscountAmount(d).toStringAsFixed(2)})';
                 return ListTile(
                   dense: true,
                   leading: Icon(Icons.discount, color: _selectedDiscountName == d.name ? Colors.orange : null),
