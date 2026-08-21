@@ -11,6 +11,10 @@ class Sale {
     required this.items,
     required this.subtotal,
     required this.discountTotal,
+    this.discountName = '',
+    this.discountId = '',
+    this.discountType = '',
+    this.discountValue = 0,
     required this.taxTotal,
     required this.total,
     required this.paymentMethod,
@@ -38,6 +42,10 @@ class Sale {
   final List<Map<String, dynamic>> items;
   final double subtotal;
   final double discountTotal;
+  final String discountName;
+  final String discountId;
+  final String discountType;
+  final double discountValue;
   final double taxTotal;
   final double total;
   final String paymentMethod;
@@ -76,12 +84,16 @@ class Sale {
       ),
       subtotal: (data['subtotal'] as num? ?? 0).toDouble(),
       discountTotal: (data['discountTotal'] as num? ?? 0).toDouble(),
+      discountName: data['discountName'] as String? ?? '',
+      discountId: data['discountId'] as String? ?? '',
+      discountType: data['discountType'] as String? ?? '',
+      discountValue: (data['discountValue'] as num? ?? 0).toDouble(),
       taxTotal: (data['taxTotal'] as num? ?? 0).toDouble(),
       total: (data['total'] as num? ?? 0).toDouble(),
       paymentMethod: data['paymentMethod'] as String? ?? 'cash',
       cashReceived: (data['cashReceived'] as num?)?.toDouble(),
       changeDue: (data['changeDue'] as num?)?.toDouble(),
-      status: data['status'] as String? ?? 'paid',
+      status: data['status'] as String? ?? 'completed',
       originalSaleId: data['originalSaleId'] as String?,
       returnedItems: List<Map<String, dynamic>>.from(
         (data['returnedItems'] as List? ?? const []).map(

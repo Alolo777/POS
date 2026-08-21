@@ -208,6 +208,10 @@ class _PosScreenState extends State<PosScreen> {
         items: List<CartItem>.from(_cartProvider.cart),
         subtotal: _subtotal,
         discountTotal: _cartProvider.ticketDiscount,
+        discountName: _cartProvider.ticketDiscountName ?? '',
+        discountId: _cartProvider.ticketDiscountId,
+        discountType: _cartProvider.ticketDiscountType,
+        discountValue: _cartProvider.ticketDiscountValue,
         total: _total,
         paymentMethod: paymentMethod,
         cashReceived: cashReceived,
@@ -275,7 +279,7 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   Future<void> _showTicketDiscountDialog() async {
-    final result = await showDialog<({String name, double amount})>(
+    final result = await showDialog<TicketDiscountSelection>(
       context: context,
       builder: (context) => TicketDiscountDialog(
         businessId: widget.businessId,
@@ -284,7 +288,13 @@ class _PosScreenState extends State<PosScreen> {
       ),
     );
     if (result == null || !mounted) return;
-    _cartProvider.setTicketDiscount(result.amount, result.name);
+    _cartProvider.setTicketDiscount(
+      result.amount,
+      result.name,
+      id: result.id,
+      type: result.type,
+      value: result.value,
+    );
     _showMessage('Descuento aplicado: ${result.name}');
   }
 
@@ -376,6 +386,7 @@ class _PosScreenState extends State<PosScreen> {
         quantity: (item['quantity'] as num? ?? 0).toDouble(),
         modifiers: parseModifiers(item['modifiers']),
         discount: (item['discount'] as num? ?? 0).toDouble(),
+        discountName: item['discountName'] as String? ?? '',
         chickenCount: item['chickenCount'] as int?,
         pieceSwaps: parsePieceSwaps(item['pieceSwaps']),
       );
@@ -383,7 +394,7 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   Future<void> _editCartItem(CartItem item) async {
-    final result = await showDialog<({List<SelectedModifier> modifiers, double discount})>(
+    final result = await showDialog<({List<SelectedModifier> modifiers, double discount, String discountName})>(
       context: context,
       builder: (context) => ModifierSelectionDialog(
         businessId: widget.businessId,
@@ -396,7 +407,10 @@ class _PosScreenState extends State<PosScreen> {
     if (result == null || !mounted) return;
     final index = _cartProvider.indexOf(item.product.id);
     if (index == -1) return;
-    _cartProvider.updateItem(index, item.copyWith(modifiers: result.modifiers, discount: result.discount));
+    _cartProvider.updateItem(
+      index,
+      item.copyWith(modifiers: result.modifiers, discount: result.discount, discountName: result.discountName),
+    );
   }
 
   Future<void> _showCartDetails() async {

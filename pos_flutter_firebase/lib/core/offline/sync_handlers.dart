@@ -338,6 +338,10 @@ Future<void> _handleCreateSale(Map<String, dynamic> data) async {
       'items': items,
       'subtotal': _dbl(data, 'subtotal'),
       'discountTotal': _dbl(data, 'discountTotal'),
+      'discountName': _optString(data, 'discountName') ?? '',
+      'discountId': _optString(data, 'discountId') ?? '',
+      'discountType': _optString(data, 'discountType') ?? '',
+      'discountValue': data['discountValue'] == null ? 0.0 : (data['discountValue'] as num).toDouble(),
       'total': _dbl(data, 'total'),
       'paymentMethod': _str(data, 'paymentMethod'),
       'cashReceived': data['cashReceived'],
@@ -699,11 +703,13 @@ Future<void> _handleAddDiscount(Map<String, dynamic> data) async {
   final existing = await docRef.get();
   if (existing.exists) return;
   await docRef.set({
+    'businessId': businessId,
     'name': _str(data, 'name'),
     'type': _str(data, 'type'),
     'value': _dbl(data, 'value'),
     'active': true,
     'createdAt': FieldValue.serverTimestamp(),
+    'updatedAt': FieldValue.serverTimestamp(),
   });
 }
 
@@ -713,12 +719,16 @@ Future<void> _handleUpdateDiscount(Map<String, dynamic> data) async {
     'name': _str(data, 'name'),
     'type': _str(data, 'type'),
     'value': _dbl(data, 'value'),
+    'updatedAt': FieldValue.serverTimestamp(),
   });
 }
 
 Future<void> _handleDeactivateDiscount(Map<String, dynamic> data) async {
   final businessId = _str(data, 'businessId');
-  await _firestore.collection('businesses').doc(businessId).collection('discounts').doc(_str(data, 'discountId')).update({'active': false});
+  await _firestore.collection('businesses').doc(businessId).collection('discounts').doc(_str(data, 'discountId')).update({
+    'active': false,
+    'updatedAt': FieldValue.serverTimestamp(),
+  });
 }
 
 Future<void> _handleAddEmployee(Map<String, dynamic> data) async {

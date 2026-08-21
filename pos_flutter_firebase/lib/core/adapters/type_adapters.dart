@@ -541,6 +541,10 @@ class SaleAdapter extends TypeAdapter<Sale> {
       items: (fields[6] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList(),
       subtotal: fields[7] as double,
       discountTotal: fields[8] as double,
+      discountName: fields[25] as String? ?? '',
+      discountId: fields[26] as String? ?? '',
+      discountType: fields[27] as String? ?? '',
+      discountValue: (fields[28] as num?)?.toDouble() ?? 0,
       taxTotal: fields[9] as double,
       total: fields[10] as double,
       paymentMethod: fields[11] as String,
@@ -562,7 +566,7 @@ class SaleAdapter extends TypeAdapter<Sale> {
 
   @override
   void write(BinaryWriter writer, Sale obj) {
-    writer.writeByte(25);
+    writer.writeByte(29);
     writer.writeByte(0);
     writer.write(obj.id);
     writer.writeByte(1);
@@ -613,6 +617,14 @@ class SaleAdapter extends TypeAdapter<Sale> {
     writer.write(obj.refund);
     writer.writeByte(24);
     writer.write(obj.refundIds);
+    writer.writeByte(25);
+    writer.write(obj.discountName);
+    writer.writeByte(26);
+    writer.write(obj.discountId);
+    writer.writeByte(27);
+    writer.write(obj.discountType);
+    writer.writeByte(28);
+    writer.write(obj.discountValue);
   }
 }
 

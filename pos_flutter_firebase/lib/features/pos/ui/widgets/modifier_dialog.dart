@@ -88,7 +88,7 @@ class _ModifierSelectionDialogState extends State<ModifierSelectionDialog> {
                 .where((m) => _selectedIds.contains(m.id))
                 .map((m) => SelectedModifier(id: m.id, name: m.name, price: m.price))
                 .toList();
-            Navigator.pop(context, (modifiers: modifiers, discount: _selectedDiscount));
+            Navigator.pop(context, (modifiers: modifiers, discount: _selectedDiscount, discountName: _selectedDiscountName ?? ''));
           },
           child: const Text('Aceptar'),
         ),

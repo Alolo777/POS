@@ -17,6 +17,9 @@ class CartProvider extends ChangeNotifier {
 
   double _ticketDiscount = 0;
   String? _ticketDiscountName;
+  String _ticketDiscountId = '';
+  String _ticketDiscountType = '';
+  double _ticketDiscountValue = 0;
   String? _currentOpenTicketId;
   String? _currentOpenTicketName;
 
@@ -24,6 +27,9 @@ class CartProvider extends ChangeNotifier {
   double get subtotal => _cart.fold(0, (sum, item) => sum + item.subtotal);
   double get ticketDiscount => _ticketDiscount;
   String? get ticketDiscountName => _ticketDiscountName;
+  String get ticketDiscountId => _ticketDiscountId;
+  String get ticketDiscountType => _ticketDiscountType;
+  double get ticketDiscountValue => _ticketDiscountValue;
   double get total => (subtotal - _ticketDiscount).clamp(0, double.infinity);
   String? get currentOpenTicketId => _currentOpenTicketId;
   String? get currentOpenTicketName => _currentOpenTicketName;
@@ -94,6 +100,9 @@ class CartProvider extends ChangeNotifier {
     _cart.clear();
     _ticketDiscount = 0;
     _ticketDiscountName = null;
+    _ticketDiscountId = '';
+    _ticketDiscountType = '';
+    _ticketDiscountValue = 0;
     _currentOpenTicketId = null;
     _currentOpenTicketName = null;
     notifyListeners();
@@ -104,15 +113,28 @@ class CartProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setTicketDiscount(double amount, String? name) {
+  void setTicketDiscount(double amount, String? name, {String id = '', String type = '', double value = 0}) {
     _ticketDiscount = amount;
-    _ticketDiscountName = amount > 0 ? name : null;
+    if (amount > 0) {
+      _ticketDiscountName = name;
+      _ticketDiscountId = id;
+      _ticketDiscountType = type;
+      _ticketDiscountValue = value;
+    } else {
+      _ticketDiscountName = null;
+      _ticketDiscountId = '';
+      _ticketDiscountType = '';
+      _ticketDiscountValue = 0;
+    }
     notifyListeners();
   }
 
   void removeTicketDiscount() {
     _ticketDiscount = 0;
     _ticketDiscountName = null;
+    _ticketDiscountId = '';
+    _ticketDiscountType = '';
+    _ticketDiscountValue = 0;
     notifyListeners();
   }
 

@@ -92,6 +92,7 @@ class CartItem {
     required this.quantity,
     this.modifiers = const [],
     this.discount = 0,
+    this.discountName = '',
     this.chickenCount,
     this.pieceSwaps = const [],
   });
@@ -100,6 +101,9 @@ class CartItem {
   final double quantity;
   final List<SelectedModifier> modifiers;
   final double discount;
+
+  /// Nombre del descuento del catalogo aplicado a la linea ('' si no tiene).
+  final String discountName;
 
   /// Pollos enteros vendidos en esta línea. Solo se usa para el producto
   /// de pollo entero y permite descontar el conteo de pollos del stock.
@@ -125,6 +129,7 @@ class CartItem {
     double? quantity,
     List<SelectedModifier>? modifiers,
     double? discount,
+    String? discountName,
     int? chickenCount,
     List<PieceSwap>? pieceSwaps,
   }) {
@@ -133,6 +138,7 @@ class CartItem {
       quantity: quantity ?? this.quantity,
       modifiers: modifiers ?? this.modifiers,
       discount: discount ?? this.discount,
+      discountName: discountName ?? this.discountName,
       chickenCount: chickenCount ?? this.chickenCount,
       pieceSwaps: pieceSwaps ?? this.pieceSwaps,
     );
@@ -148,6 +154,7 @@ class CartItem {
       'quantity': quantity,
       'modifiers': modifiers.map((m) => m.toMap()).toList(),
       'discount': discount,
+      'discountName': discountName,
       'subtotal': subtotal,
       if (chickenCount != null) 'chickenCount': chickenCount,
       if (pieceSwaps.isNotEmpty) 'pieceSwaps': pieceSwaps.map((s) => s.toMap()).toList(),

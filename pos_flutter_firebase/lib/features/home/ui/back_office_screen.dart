@@ -151,7 +151,7 @@ class _ReportsTabState extends State<_ReportsTab> {
             };
             final allSales = salesSnapshot.data ?? const <Sale>[];
             final sales = allSales.where((sale) {
-              final date = sale.createdAt ?? sale.clientCreatedAt;
+              final date = sale.clientCreatedAt ?? sale.createdAt;
               if (date == null) return false;
               final matchesStore = widget.selectedStoreId == null || sale.storeId == widget.selectedStoreId;
               return matchesStore && !date.isBefore(_startDate) && !date.isAfter(_endDate);
@@ -180,6 +180,10 @@ class _ReportsTabState extends State<_ReportsTab> {
                 if (sales.isEmpty) const SizedBox(height: 12),
                 _metricGrid(context, summary),
                 const SizedBox(height: 16),
+                if (summary.discountBreakdown.isNotEmpty) ...[
+                  _sectionCard(context, 'Descuentos por promocion', summary.discountBreakdown),
+                  const SizedBox(height: 16),
+                ],
                 _dailyChart(context, summary),
                 const SizedBox(height: 16),
                 _sectionCard(context, 'Ventas por articulo', summary.products),
@@ -188,7 +192,7 @@ class _ReportsTabState extends State<_ReportsTab> {
                 _sectionCard(context, 'Ventas por tipo de pago', summary.paymentTypes),
                 _receiptsCard(context, sales),
                 const SizedBox(height: 16),
-                _cortesDeCajaCard(context),
+                _cortesDeCajaCard(context, employeeNames),
               ],
             );
           },
@@ -421,7 +425,7 @@ class _ReportsTabState extends State<_ReportsTab> {
     );
   }
 
-  Widget _cortesDeCajaCard(BuildContext context) {
+  Widget _cortesDeCajaCard(BuildContext context, Map<String, String> employeeNames) {
     return StreamBuilder<List<Shift>>(
       stream: context.read<ShiftRepository>().watchAllClosedShifts(businessId: widget.businessId),
       builder: (context, snapshot) {
@@ -458,7 +462,7 @@ class _ReportsTabState extends State<_ReportsTab> {
                     title: Text('Cierre ${_formatDate(s.closedAt)}'),
                     subtitle: Text('Sucursal: ${_storeName(s.storeId)} | Efectivo: \$${s.expectedCash.toStringAsFixed(2)}'),
                     trailing: Text('\$${s.totalSales.toStringAsFixed(2)}'),
-                    onTap: () => _showCorteDetail(context, s),
+                    onTap: () => _showCorteDetail(context, s, employeeNames),
                   )),
               ],
             ),
@@ -468,7 +472,8 @@ class _ReportsTabState extends State<_ReportsTab> {
     );
   }
 
-  void _showCorteDetail(BuildContext context, Shift shift) {
+  void _showCorteDetail(BuildContext context, Shift shift, Map<String, String> employeeNames) {
+    final employeeName = employeeNames[shift.employeeId] ?? shift.employeeId;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -479,7 +484,7 @@ class _ReportsTabState extends State<_ReportsTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _detailRow('Sucursal', _storeName(shift.storeId)),
-              _detailRow('Empleado', shift.employeeId),
+              _detailRow('Empleado', employeeName),
               _detailRow('Abierto', _formatDate(shift.openedAt)),
               _detailRow('Cerrado', _formatDate(shift.closedAt)),
               const Divider(),
@@ -904,6 +909,7 @@ class _ReportSummary {
     required this.cardSales,
     required this.refunds,
     required this.discounts,
+    required this.discountBreakdown,
     required this.products,
     required this.categories,
     required this.employees,
@@ -917,6 +923,7 @@ class _ReportSummary {
   final double cardSales;
   final double refunds;
   final double discounts;
+  final Map<String, double> discountBreakdown;
   final Map<String, double> products;
   final Map<String, double> categories;
   final Map<String, double> employees;
@@ -924,16 +931,20 @@ class _ReportSummary {
   final Map<String, double> dailySales;
 
   factory _ReportSummary.fromSales(List<Sale> sales, {required Map<String, String> employeeNames}) {
-    final originalSales = sales.where((sale) => !sale.isRefund).toList();
+    final originalSales = sales.where((sale) => !sale.isRefund && !sale.isCancelled).toList();
     final refunds = sales.where((sale) => sale.isRefund).toList();
     final grossSales = originalSales.fold<double>(0, (total, sale) => total + sale.items.fold<double>(0, (sum, item) {
           final quantity = (item['quantity'] as num? ?? 0).toDouble();
+          final returned = _returnedQuantity(item, quantity);
           final unitPrice = (item['unitPrice'] as num? ?? 0).toDouble();
-          return sum + (quantity * unitPrice);
+          return sum + (quantity - returned) * unitPrice;
         }));
     final refundTotal = refunds.fold<double>(0, (total, sale) => total + sale.total);
     final paidTotal = originalSales.fold<double>(0, (total, sale) => total + sale.total);
-    final discounts = originalSales.fold<double>(0, (total, sale) => total + sale.discountTotal);
+    final discounts = originalSales.fold<double>(0, (total, sale) {
+      final factor = 1 - _returnedRatio(sale);
+      return total + (sale.discountTotal + _lineDiscounts(sale)) * factor;
+    });
     final cashSales = originalSales.where((sale) => sale.paymentMethod == 'cash').fold<double>(0, (total, sale) => total + sale.total);
     final cardSales = originalSales.where((sale) => sale.paymentMethod == 'card').fold<double>(0, (total, sale) => total + sale.total);
     final products = <String, double>{};
@@ -941,12 +952,25 @@ class _ReportSummary {
     final employees = <String, double>{};
     final paymentTypes = <String, double>{};
     final dailySales = <String, double>{};
+    final discountBreakdown = <String, double>{};
 
     for (final sale in originalSales) {
       final employeeName = employeeNames[sale.employeeId] ?? sale.employeeId;
       employees[employeeName] = (employees[employeeName] ?? 0) + sale.total;
       final paymentLabel = sale.paymentMethod == 'card' ? 'Tarjeta' : 'Efectivo';
       paymentTypes[paymentLabel] = (paymentTypes[paymentLabel] ?? 0) + sale.total;
+      if (sale.discountTotal > 0) {
+        final label = sale.discountName.isNotEmpty ? sale.discountName : 'Descuento sin nombre';
+        discountBreakdown[label] = (discountBreakdown[label] ?? 0) + sale.discountTotal * (1 - _returnedRatio(sale));
+      }
+      for (final item in sale.items) {
+        final lineDiscount = (item['discount'] as num? ?? 0).toDouble();
+        if (lineDiscount > 0) {
+          final lineName = item['discountName'] as String? ?? '';
+          final label = lineName.isNotEmpty ? lineName : 'Descuento por producto';
+          discountBreakdown[label] = (discountBreakdown[label] ?? 0) + lineDiscount * (1 - _returnedRatio(sale));
+        }
+      }
       final date = sale.createdAt ?? sale.clientCreatedAt;
       if (date != null) {
         final key = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
@@ -955,7 +979,11 @@ class _ReportSummary {
 
       for (final item in sale.items) {
         final name = item['name'] as String? ?? 'Producto';
-        final itemTotal = (item['subtotal'] as num? ?? 0).toDouble();
+        final itemSubtotal = (item['subtotal'] as num? ?? 0).toDouble();
+        final quantity = (item['quantity'] as num? ?? 0).toDouble();
+        final returned = _returnedQuantity(item, quantity);
+        final effectiveFactor = quantity > 0 ? (quantity - returned) / quantity : 1.0;
+        final itemTotal = itemSubtotal * effectiveFactor;
         final categoryName = item['categoryName'] as String? ?? 'Sin categoria';
         products[name] = (products[name] ?? 0) + itemTotal;
         categories[categoryName.isEmpty ? 'Sin categoria' : categoryName] =
@@ -980,12 +1008,37 @@ class _ReportSummary {
       cardSales: cardSales,
       refunds: refundTotal,
       discounts: discounts,
+      discountBreakdown: discountBreakdown,
       products: products,
       categories: categories,
       employees: employees,
       paymentTypes: paymentTypes,
       dailySales: dailySales,
     );
+  }
+
+  static double _lineDiscounts(Sale sale) {
+    return sale.items.fold<double>(0, (total, item) => total + (item['discount'] as num? ?? 0).toDouble());
+  }
+
+  static double _returnedQuantity(Map<String, dynamic> item, double quantity) {
+    final returned = (item['returnedQuantity'] as num? ?? 0).toDouble();
+    return returned.clamp(0.0, quantity).toDouble();
+  }
+
+  /// Proporcion devuelta de la venta (por importe bruto). Es 0 para ventas
+  /// sin devoluciones parciales, por lo que no altera metricas normales.
+  static double _returnedRatio(Sale sale) {
+    var gross = 0.0;
+    var returned = 0.0;
+    for (final item in sale.items) {
+      final quantity = (item['quantity'] as num? ?? 0).toDouble();
+      final unitPrice = (item['unitPrice'] as num? ?? 0).toDouble();
+      gross += quantity * unitPrice;
+      returned += _returnedQuantity(item, quantity) * unitPrice;
+    }
+    if (gross <= 0) return 0;
+    return (returned / gross).clamp(0.0, 1.0).toDouble();
   }
 }
 

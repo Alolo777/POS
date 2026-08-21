@@ -3,6 +3,14 @@
 import 'package:pos_flutter_firebase/shared/models/discount.dart';
 import 'package:pos_flutter_firebase/features/pos/data/discount_service.dart';
 
+typedef TicketDiscountSelection = ({
+  String id,
+  String name,
+  String type,
+  double value,
+  double amount,
+});
+
 class TicketDiscountDialog extends StatefulWidget {
   const TicketDiscountDialog({
     super.key,
@@ -22,11 +30,23 @@ class TicketDiscountDialog extends StatefulWidget {
 class _TicketDiscountDialogState extends State<TicketDiscountDialog> {
   final _discountService = DiscountService();
 
-  ({String name, double amount}) _apply(Discount discount) {
+  TicketDiscountSelection _apply(Discount discount) {
     if (discount.isPercentage) {
-      return (name: discount.name, amount: widget.subtotal * (discount.value / 100));
+      return (
+        id: discount.id,
+        name: discount.name,
+        type: discount.type,
+        value: discount.value,
+        amount: widget.subtotal * (discount.value / 100),
+      );
     }
-    return (name: discount.name, amount: discount.value > widget.subtotal ? widget.subtotal : discount.value);
+    return (
+      id: discount.id,
+      name: discount.name,
+      type: discount.type,
+      value: discount.value,
+      amount: discount.value > widget.subtotal ? widget.subtotal : discount.value,
+    );
   }
 
   @override
@@ -50,7 +70,13 @@ class _TicketDiscountDialogState extends State<TicketDiscountDialog> {
                   Text('Descuento: \$${widget.currentDiscount.toStringAsFixed(2)}'),
                   const SizedBox(height: 12),
                   FilledButton(
-                    onPressed: () => Navigator.pop(context, (name: 'Sin descuento', amount: 0.0)),
+                    onPressed: () => Navigator.pop(context, (
+                      id: '',
+                      name: 'Sin descuento',
+                      type: '',
+                      value: 0,
+                      amount: 0.0,
+                    )),
                     child: const Text('Quitar descuento'),
                   ),
                 ],
